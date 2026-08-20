@@ -1,27 +1,103 @@
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+
+# Environment variables
 .env
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
 !.env.example
 
-node_modules/
+# Expo / React Native
 .expo/
 dist/
-web-build/
-.tmp-web-export/
-expo-env.d.ts
-.kotlin/
-*.orig.*
+npm-debug.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
-.metro-health-check*
-npm-debug.*
-yarn-debug.*
-yarn-error.*
+*.orig.*
+web-build/
+.tmp-web-export/
+expo-env.d.ts
+
+# iOS
+ios/build/
+ios/Pods/
+ios/Podfile.lock
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+ios/.symlinks
+ios/Pods
+
+# Android
+android/build/
+android/.gradle/
+android/app/build/
+android/app/src/main/assets/
+android/libs
+android/*.iml
+android/local.properties
+android/gradle.properties
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# macOS / Windows / Linux
 .DS_Store
-*.pem
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+
+# TypeScript
 *.tsbuildinfo
-/ios
-/android
+
+# Scratch files (Local project specific)
+scratch_reset.sql
+fix_permissions.sql
+*.pem
