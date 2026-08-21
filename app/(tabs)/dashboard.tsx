@@ -3,10 +3,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
+import { useAuth } from '@/context/AuthContext';
 import { Colors } from '@/lib/theme';
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const { signOut } = useAuth();
 
   const handleQuickAction = (route: string) => {
     // Navigate to the respective screen
@@ -20,8 +22,13 @@ export default function DashboardScreen() {
         
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.kicker}>Overview</Text>
-          <Text style={styles.title}>Merchant Dashboard</Text>
+          <View>
+            <Text style={styles.kicker}>Overview</Text>
+            <Text style={styles.title}>Merchant Dashboard</Text>
+          </View>
+          <TouchableOpacity onPress={() => signOut()} style={styles.logoutBtn}>
+            <Ionicons name="log-out-outline" size={24} color={Colors.textSecondary} />
+          </TouchableOpacity>
         </View>
 
         {/* Summary Cards */}
@@ -148,7 +155,17 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 24,
+  },
+  logoutBtn: {
+    padding: 8,
+    backgroundColor: Colors.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   kicker: {
     fontSize: 12,

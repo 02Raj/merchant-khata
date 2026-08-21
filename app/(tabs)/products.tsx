@@ -11,29 +11,34 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { getFirebaseAuth } from '@/lib/firebase';
+import { useAuth } from '@/context/AuthContext';
 
 type Product = {
   id: string;
   name: string;
   category: string;
   unit: string;
+  unit_category: 'quantity' | 'measurement';
   purchase_price: number;
   sale_price: number;
   wholesale_price: number | null;
   moq: number | null;
   is_active: boolean;
   stockCount: number;
+  low_stock_threshold: number;
+  hsn_code: string | null;
+  gst_rate: number;
+  tax_inclusive: boolean;
+  barcode: string | null;
 };
 
-type BusinessInfo = {
-  id: string;
-  business_type: 'retail' | 'wholesale' | 'both';
-};
-
-const COMMON_UNITS = ['pcs', 'kg', 'g', 'ltr', 'ml', 'box', 'pack'];
+const PREDEFINED_CATEGORIES = ['Groceries', 'Electronics', 'Clothing', 'Hardware', 'Dairy', 'Spices', 'Snacks', 'Beverages'];
+const QUANTITY_UNITS = ['pcs', 'box', 'pack', 'dozen', 'carton'];
+const MEASUREMENT_UNITS = ['kg', 'g', 'ltr', 'ml', 'meter'];
+const GST_RATES = [0, 5, 12, 18, 28];
 
 export default function ProductsScreen() {
-  const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null);
+  const { businessInfo } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -49,38 +54,27 @@ export default function ProductsScreen() {
   // Form State
   const [formName, setFormName] = useState('');
   const [formCategory, setFormCategory] = useState('');
+  const [formIsCustomCategory, setFormIsCustomCategory] = useState(false);
+  const [formUnitCategory, setFormUnitCategory] = useState<'quantity' | 'measurement'>('quantity');
   const [formUnit, setFormUnit] = useState('pcs');
+  const [formLowStockThreshold, setFormLowStockThreshold] = useState('5');
   const [formPurchasePrice, setFormPurchasePrice] = useState('');
   const [formSalePrice, setFormSalePrice] = useState('');
   const [formWholesalePrice, setFormWholesalePrice] = useState('');
   const [formMoq, setFormMoq] = useState('');
+  const [formHsnCode, setFormHsnCode] = useState('');
+  const [formGstRate, setFormGstRate] = useState(0);
+  const [formTaxInclusive, setFormTaxInclusive] = useState(true);
+  const [formBarcode, setFormBarcode] = useState('');
+  const [formOpeningStock, setFormOpeningStock] = useState('');
+  const [originalStock, setOriginalStock] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
-
-  const fetchBusinessInfo = async () => {
-    try {
-      const user = getFirebaseAuth().currentUser;
-      if (!user) return null;
-
-      // Note: Because of RLS, fetching businesses will only return the ones we have access to
-      const { data, error } = await supabase
-        .from('businesses')
-        .select('id, business_type')
-        .limit(1)
-        .single();
-        
-      if (error) throw error;
-      setBusinessInfo(data as BusinessInfo);
-      return data;
-    } catch (err: any) {
-      console.error('Error fetching business info:', err);
-      return null;
-    }
-  };
 
   const fetchProducts = async (isRefreshing = false) => {
     if (!isRefreshing) setLoading(true);
     setError(null);
     try {
+      if (!businessInfo) throw new Error('Not authenticated properly');
       const { data, error: fetchError } = await supabase
         .from('products')
         .select(`
@@ -89,6 +83,7 @@ export default function ProductsScreen() {
             quantity_change
           )
         `)
+        .eq('business_id', businessInfo.id)
         .order('name');
 
       if (fetchError) throw fetchError;
@@ -100,12 +95,18 @@ export default function ProductsScreen() {
           name: p.name,
           category: p.category,
           unit: p.unit,
+          unit_category: p.unit_category || 'quantity',
           purchase_price: Number(p.purchase_price),
           sale_price: Number(p.sale_price),
           wholesale_price: p.wholesale_price ? Number(p.wholesale_price) : null,
           moq: p.moq ? Number(p.moq) : null,
           is_active: p.is_active,
           stockCount: stock,
+          low_stock_threshold: p.low_stock_threshold ? Number(p.low_stock_threshold) : 5,
+          hsn_code: p.hsn_code || null,
+          gst_rate: p.gst_rate ? Number(p.gst_rate) : 0,
+          tax_inclusive: p.tax_inclusive !== false,
+          barcode: p.barcode || null,
         };
       });
 
@@ -119,7 +120,6 @@ export default function ProductsScreen() {
   };
 
   const initData = async () => {
-    await fetchBusinessInfo();
     await fetchProducts();
   };
 
@@ -127,7 +127,7 @@ export default function ProductsScreen() {
   useFocusEffect(
     useCallback(() => {
       initData();
-    }, [])
+    }, [businessInfo])
   );
 
   const onRefresh = () => {
@@ -139,11 +139,19 @@ export default function ProductsScreen() {
     setEditingId(null);
     setFormName('');
     setFormCategory('');
+    setFormIsCustomCategory(false);
+    setFormUnitCategory('quantity');
     setFormUnit('pcs');
+    setFormLowStockThreshold('5');
     setFormPurchasePrice('');
     setFormSalePrice('');
     setFormWholesalePrice('');
     setFormMoq('');
+    setFormHsnCode('');
+    setFormGstRate(0);
+    setFormTaxInclusive(true);
+    setFormBarcode('');
+    setFormOpeningStock('');
     setFormError(null);
     setModalVisible(true);
   };
@@ -152,11 +160,20 @@ export default function ProductsScreen() {
     setEditingId(product.id);
     setFormName(product.name);
     setFormCategory(product.category);
+    setFormIsCustomCategory(!PREDEFINED_CATEGORIES.includes(product.category));
+    setFormUnitCategory(product.unit_category);
     setFormUnit(product.unit);
+    setFormLowStockThreshold(product.low_stock_threshold.toString());
     setFormPurchasePrice(product.purchase_price.toString());
     setFormSalePrice(product.sale_price.toString());
     setFormWholesalePrice(product.wholesale_price?.toString() || '');
     setFormMoq(product.moq?.toString() || '');
+    setFormHsnCode(product.hsn_code || '');
+    setFormGstRate(product.gst_rate);
+    setFormTaxInclusive(product.tax_inclusive);
+    setFormBarcode(product.barcode || '');
+    setFormOpeningStock(product.stockCount.toString());
+    setOriginalStock(product.stockCount);
     setFormError(null);
     setModalVisible(true);
   };
@@ -172,7 +189,8 @@ export default function ProductsScreen() {
       setFormError('Business not found. Try restarting the app.');
       return;
     }
-    if (!formName.trim() || !formCategory.trim() || !formUnit.trim() || !formPurchasePrice.trim() || !formSalePrice.trim()) {
+    const finalCategory = formCategory.trim();
+    if (!formName.trim() || !finalCategory || !formUnit.trim() || !formPurchasePrice.trim() || !formSalePrice.trim()) {
       setFormError('Please fill all required fields.');
       return;
     }
@@ -182,6 +200,21 @@ export default function ProductsScreen() {
     if (isNaN(purchase) || purchase < 0 || isNaN(sale) || sale < 0) {
       setFormError('Prices must be valid positive numbers.');
       return;
+    }
+
+    const lowStock = parseFloat(formLowStockThreshold);
+    if (isNaN(lowStock) || lowStock < 0) {
+      setFormError('Low stock threshold must be a valid positive number.');
+      return;
+    }
+
+    let openingStockVal = 0;
+    if (formOpeningStock.trim()) {
+      openingStockVal = parseFloat(formOpeningStock);
+      if (isNaN(openingStockVal) || openingStockVal < 0) {
+        setFormError('Stock must be a valid positive number.');
+        return;
+      }
     }
 
     let wholesale: number | null = null;
@@ -215,6 +248,10 @@ export default function ProductsScreen() {
         sale_price: sale,
         wholesale_price: wholesale,
         moq: moqVal,
+        hsn_code: formHsnCode.trim() || null,
+        gst_rate: formGstRate,
+        tax_inclusive: formTaxInclusive,
+        barcode: formBarcode.trim() || null,
         is_active: true,
       };
 
@@ -224,11 +261,41 @@ export default function ProductsScreen() {
           .update(payload)
           .eq('id', editingId);
         if (updateError) throw updateError;
+        
+        // Handle manual stock adjustment during edit
+        const qtyChange = openingStockVal - originalStock;
+        if (qtyChange !== 0) {
+          const { error: invError } = await supabase
+            .from('inventory_transactions')
+            .insert({
+              business_id: businessInfo.id,
+              product_id: editingId,
+              quantity_change: qtyChange,
+              reason: 'Manual adjustment',
+              source_type: 'adjustment',
+              source_id: editingId // using product id as source for manual adjustment
+            });
+          if (invError) throw invError;
+        }
       } else {
-        const { error: insertError } = await supabase
+        const { data: newProduct, error: insertError } = await supabase
           .from('products')
-          .insert(payload);
+          .insert(payload)
+          .select('id')
+          .single();
         if (insertError) throw insertError;
+
+        if (newProduct && openingStockVal > 0) {
+          const { error: stockError } = await supabase.from('inventory_transactions').insert({
+            business_id: businessInfo.id,
+            product_id: newProduct.id,
+            quantity_change: openingStockVal,
+            reason: 'Opening Stock',
+            source_type: 'adjustment',
+            source_id: newProduct.id,
+          });
+          if (stockError) throw stockError;
+        }
       }
 
       closeForm();
@@ -252,7 +319,7 @@ export default function ProductsScreen() {
     if (item.stockCount <= 0) {
       stockStatus = 'Out of Stock';
       stockColor = Colors.textSecondary;
-    } else if (item.stockCount <= 5) {
+    } else if (item.stockCount <= item.low_stock_threshold) {
       stockStatus = 'Low Stock';
       stockColor = Colors.warn;
     }
@@ -279,8 +346,9 @@ export default function ProductsScreen() {
           <View>
             <Text style={styles.priceLabel}>Sale Price</Text>
             <Text style={styles.priceValue}>₹{item.sale_price.toFixed(2)}</Text>
+            <Text style={styles.gstText}>{item.gst_rate}% GST {item.tax_inclusive ? '(Inc)' : '(Exc)'}</Text>
           </View>
-          {item.wholesale_price ? (
+          {businessInfo?.business_type !== 'retail' && item.wholesale_price ? (
             <View>
               <Text style={styles.priceLabel}>Wholesale (Min: {item.moq || 1})</Text>
               <Text style={styles.priceValue}>₹{item.wholesale_price.toFixed(2)}</Text>
@@ -378,27 +446,108 @@ export default function ProductsScreen() {
               </View>
 
               <View style={styles.formGroup}>
+                <Text style={styles.label}>Barcode / SKU (Optional)</Text>
+                <TextInput style={styles.input} value={formBarcode} onChangeText={setFormBarcode} placeholder="Scan or enter barcode" placeholderTextColor={Colors.textSecondary} />
+              </View>
+
+              <View style={styles.formGroup}>
                 <Text style={styles.label}>Category *</Text>
-                <TextInput style={styles.input} value={formCategory} onChangeText={setFormCategory} placeholder="e.g. Groceries" placeholderTextColor={Colors.textSecondary} />
+                {formIsCustomCategory ? (
+                  <View style={styles.row}>
+                    <TextInput style={[styles.input, { flex: 1 }]} value={formCategory} onChangeText={setFormCategory} placeholder="Enter Custom Category" placeholderTextColor={Colors.textSecondary} />
+                    <TouchableOpacity style={styles.cancelCustomButton} onPress={() => { setFormIsCustomCategory(false); setFormCategory(''); }}>
+                      <Ionicons name="close" size={24} color={Colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.unitSelector}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                      {PREDEFINED_CATEGORIES.map(c => (
+                        <TouchableOpacity key={c} style={[styles.unitChip, formCategory === c && styles.unitChipActive]} onPress={() => setFormCategory(c)}>
+                          <Text style={[styles.unitChipText, formCategory === c && styles.unitChipTextActive]}>{c}</Text>
+                        </TouchableOpacity>
+                      ))}
+                      <TouchableOpacity style={styles.unitChip} onPress={() => { setFormIsCustomCategory(true); setFormCategory(''); }}>
+                        <Text style={styles.unitChipText}>+ Custom</Text>
+                      </TouchableOpacity>
+                    </ScrollView>
+                  </View>
+                )}
               </View>
 
               <View style={styles.row}>
                 <View style={[styles.formGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Unit *</Text>
-                  <View style={styles.unitSelector}>
+                  <Text style={styles.label}>Unit Type & Unit *</Text>
+                  <View style={styles.unitTypeToggle}>
+                    <TouchableOpacity style={[styles.toggleBtn, formUnitCategory === 'quantity' && styles.toggleBtnActive]} onPress={() => { setFormUnitCategory('quantity'); setFormUnit('pcs'); }}>
+                      <Text style={[styles.toggleBtnText, formUnitCategory === 'quantity' && styles.toggleBtnTextActive]}>Quantity</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.toggleBtn, formUnitCategory === 'measurement' && styles.toggleBtnActive]} onPress={() => { setFormUnitCategory('measurement'); setFormUnit('kg'); }}>
+                      <Text style={[styles.toggleBtnText, formUnitCategory === 'measurement' && styles.toggleBtnTextActive]}>Measurement</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={[styles.unitSelector, { marginTop: 12 }]}>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                      {COMMON_UNITS.map(u => (
-                        <TouchableOpacity 
-                          key={u} 
-                          style={[styles.unitChip, formUnit === u && styles.unitChipActive]}
-                          onPress={() => setFormUnit(u)}
-                        >
+                      {(formUnitCategory === 'quantity' ? QUANTITY_UNITS : MEASUREMENT_UNITS).map(u => (
+                        <TouchableOpacity key={u} style={[styles.unitChip, formUnit === u && styles.unitChipActive]} onPress={() => setFormUnit(u)}>
                           <Text style={[styles.unitChipText, formUnit === u && styles.unitChipTextActive]}>{u}</Text>
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
                   </View>
                 </View>
+              </View>
+
+              <View style={styles.row}>
+                <View style={[styles.formGroup, { flex: 1 }]}>
+                  <Text style={styles.label}>{editingId ? 'Current Stock' : 'Opening Stock'}</Text>
+                  <TextInput style={styles.input} value={formOpeningStock} onChangeText={setFormOpeningStock} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textSecondary} />
+                </View>
+                <View style={[styles.formGroup, { flex: 1 }]}>
+                  <Text style={styles.label}>Low Stock Alert *</Text>
+                  <TextInput style={styles.input} value={formLowStockThreshold} onChangeText={setFormLowStockThreshold} keyboardType="numeric" placeholder="e.g. 5" placeholderTextColor={Colors.textSecondary} />
+                </View>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.sectionDivider}>GST & Tax Details</Text>
+                <View style={styles.row}>
+                  <View style={[styles.formGroup, { flex: 1 }]}>
+                    <Text style={styles.label}>HSN / SAC Code</Text>
+                    <TextInput style={styles.input} value={formHsnCode} onChangeText={setFormHsnCode} placeholder="e.g. 1006" placeholderTextColor={Colors.textSecondary} />
+                  </View>
+                  <View style={[styles.formGroup, { flex: 1 }]}>
+                    <Text style={styles.label}>GST Rate %</Text>
+                    <View style={styles.unitSelector}>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                        {GST_RATES.map(rate => (
+                          <TouchableOpacity key={rate} style={[styles.unitChip, formGstRate === rate && styles.unitChipActive]} onPress={() => setFormGstRate(rate)}>
+                            <Text style={[styles.unitChipText, formGstRate === rate && styles.unitChipTextActive]}>{rate}%</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  </View>
+                </View>
+                
+                <View style={styles.unitTypeToggle}>
+                  <TouchableOpacity style={[styles.toggleBtn, formTaxInclusive && styles.toggleBtnActive]} onPress={() => setFormTaxInclusive(true)}>
+                    <Text style={[styles.toggleBtnText, formTaxInclusive && styles.toggleBtnTextActive]}>Inclusive of Tax</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.toggleBtn, !formTaxInclusive && styles.toggleBtnActive]} onPress={() => setFormTaxInclusive(false)}>
+                    <Text style={[styles.toggleBtnText, !formTaxInclusive && styles.toggleBtnTextActive]}>Exclusive of Tax</Text>
+                  </TouchableOpacity>
+                </View>
+                
+                {formGstRate > 0 && formSalePrice && !isNaN(parseFloat(formSalePrice)) && (
+                  <View style={styles.taxPreview}>
+                    {formTaxInclusive ? (
+                      <Text style={styles.taxPreviewText}>Base: ₹{(parseFloat(formSalePrice) * 100 / (100 + formGstRate)).toFixed(2)} | Tax: ₹{(parseFloat(formSalePrice) - (parseFloat(formSalePrice) * 100 / (100 + formGstRate))).toFixed(2)}</Text>
+                    ) : (
+                      <Text style={styles.taxPreviewText}>Tax: ₹{(parseFloat(formSalePrice) * formGstRate / 100).toFixed(2)} | Total: ₹{(parseFloat(formSalePrice) * (1 + formGstRate / 100)).toFixed(2)}</Text>
+                    )}
+                  </View>
+                )}
               </View>
 
               <View style={styles.row}>
@@ -490,6 +639,15 @@ const styles = StyleSheet.create({
   unitChipActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   unitChipText: { color: Colors.textSecondary, fontWeight: '500' },
   unitChipTextActive: { color: Colors.bg, fontWeight: '700' },
+  cancelCustomButton: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 12, backgroundColor: Colors.surfaceRaised, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
+  unitTypeToggle: { flexDirection: 'row', backgroundColor: Colors.surfaceRaised, borderRadius: 8, padding: 4 },
+  toggleBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
+  toggleBtnActive: { backgroundColor: Colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
+  toggleBtnText: { fontSize: 13, fontWeight: '500', color: Colors.textSecondary },
+  toggleBtnTextActive: { color: Colors.textPrimary, fontWeight: '600' },
+  gstText: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  taxPreview: { backgroundColor: Colors.surfaceRaised, padding: 12, borderRadius: 8, marginTop: 8, borderWidth: 1, borderColor: Colors.border },
+  taxPreviewText: { color: Colors.textSecondary, fontSize: 12, textAlign: 'center', fontWeight: '500' },
   wholesaleContainer: { marginTop: 8, paddingTop: 24, borderTopWidth: 1, borderTopColor: Colors.border, gap: 20 },
   sectionDivider: { color: Colors.textPrimary, fontSize: 16, fontWeight: '600' },
   errorContainer: { backgroundColor: 'rgba(201, 162, 39, 0.15)', padding: 12, borderRadius: 6, borderLeftWidth: 3, borderLeftColor: Colors.warn },

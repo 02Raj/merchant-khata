@@ -1,9 +1,680 @@
-import { Text, View } from 'react-native';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
+import { supabase } from '@/lib/supabase';
+import { Colors } from '@/lib/theme';
+import { useAuth } from '@/context/AuthContext';
+
+type Customer = {
+  id: string;
+  name: string;
+  customer_type: 'retail' | 'wholesale';
+};
+
+type Product = {
+  id: string;
+  name: string;
+  sale_price: number;
+  wholesale_price: number | null;
+  stockCount: number;
+  gst_rate: number;
+  tax_inclusive: boolean;
+};
+
+type CartItem = {
+  product: Product;
+  quantity: number;
+  unit_price: number;
+  is_wholesale_rate: boolean;
+};
 
 export default function SalesScreen() {
+  const { session, businessInfo } = useAuth();
+  
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  
+  // Customer selection & creation state
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerModalVisible, setCustomerModalVisible] = useState(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  
+  const [addCustomerModalVisible, setAddCustomerModalVisible] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [newCustomerType, setNewCustomerType] = useState<'retail' | 'wholesale'>('retail');
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  
+  // Products search state
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Cart state
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cartModalVisible, setCartModalVisible] = useState(false);
+  
+  // Checkout state
+  const [checkoutModalVisible, setCheckoutModalVisible] = useState(false);
+  const [paymentType, setPaymentType] = useState<'cash' | 'upi' | 'card' | 'credit'>('cash');
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (businessInfo?.id) {
+        fetchCustomers(businessInfo.id);
+        fetchProducts(businessInfo.id);
+      }
+    }, [businessInfo])
+  );
+
+  const fetchCustomers = async (bizId: string) => {
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, name, customer_type')
+      .eq('business_id', bizId)
+      .order('name');
+    if (!error && data) setCustomers(data);
+  };
+
+  const fetchProducts = async (bizId: string) => {
+    const { data, error } = await supabase
+      .from('products')
+      .select(`
+        id, name, sale_price, wholesale_price, gst_rate, tax_inclusive, is_active,
+        inventory_transactions(quantity_change)
+      `)
+      .eq('business_id', bizId)
+      .eq('is_active', true)
+      .order('name');
+      
+    if (!error && data) {
+      const parsed = data.map((p: any) => {
+        const stock = p.inventory_transactions?.reduce((sum: number, tx: any) => sum + Number(tx.quantity_change), 0) || 0;
+        return {
+          id: p.id,
+          name: p.name,
+          sale_price: Number(p.sale_price),
+          wholesale_price: p.wholesale_price ? Number(p.wholesale_price) : null,
+          stockCount: stock,
+          gst_rate: Number(p.gst_rate) || 0,
+          tax_inclusive: p.tax_inclusive,
+        };
+      });
+      setProducts(parsed);
+    }
+  };
+
+  const handleCreateCustomer = async () => {
+    if (!newCustomerName.trim()) {
+      Alert.alert('Error', 'Customer name is required.');
+      return;
+    }
+    
+    const finalCustomerType = businessInfo?.business_type === 'both' ? newCustomerType : businessInfo?.business_type || 'retail';
+    
+    setCreatingCustomer(true);
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .insert({
+          business_id: businessInfo!.id,
+          name: newCustomerName.trim(),
+          phone: newCustomerPhone.trim() || 'N/A', // Using N/A if phone is empty as we set phone NOT NULL in schema
+          address: 'N/A', // Required in schema
+          customer_type: finalCustomerType
+        })
+        .select('id, name, customer_type')
+        .single();
+        
+      if (error) throw error;
+      
+      if (data) {
+        setCustomers(prev => [...prev, data]);
+        setSelectedCustomer(data);
+        setAddCustomerModalVisible(false);
+        setCustomerModalVisible(false);
+        setNewCustomerName('');
+        setNewCustomerPhone('');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to create customer');
+    } finally {
+      setCreatingCustomer(false);
+    }
+  };
+
+  const searchedProducts = useMemo(() => {
+    if (!searchQuery.trim()) return products; // Return ALL products if no search query
+    const lower = searchQuery.toLowerCase();
+    return products.filter(p => p.name.toLowerCase().includes(lower));
+  }, [searchQuery, products]);
+  
+  const filteredCustomers = useMemo(() => {
+    if (!customerSearchQuery.trim()) return customers;
+    const lower = customerSearchQuery.toLowerCase();
+    return customers.filter(c => c.name.toLowerCase().includes(lower));
+  }, [customerSearchQuery, customers]);
+
+  const addToCart = (product: Product) => {
+    const isWholesale = selectedCustomer?.customer_type === 'wholesale' && product.wholesale_price !== null;
+    const priceToUse = isWholesale ? product.wholesale_price! : product.sale_price;
+
+    setCart(prev => {
+      const existing = prev.find(item => item.product.id === product.id);
+      if (existing) {
+        return prev.map(item => 
+          item.product.id === product.id 
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+      return [...prev, { product, quantity: 1, unit_price: priceToUse, is_wholesale_rate: !!isWholesale }];
+    });
+  };
+
+  const updateQuantity = (productId: string, delta: number) => {
+    setCart(prev => prev.map(item => {
+      if (item.product.id === productId) {
+        const newQ = item.quantity + delta;
+        return newQ > 0 ? { ...item, quantity: newQ } : item;
+      }
+      return item;
+    }));
+  };
+
+  const removeFromCart = (productId: string) => {
+    setCart(prev => prev.filter(item => item.product.id !== productId));
+    if (cart.length === 1) {
+      setCartModalVisible(false); // Close cart if last item is removed
+    }
+  };
+
+  // Switch cart pricing if customer changes
+  useEffect(() => {
+    setCart(prev => prev.map(item => {
+      const isWholesale = selectedCustomer?.customer_type === 'wholesale' && item.product.wholesale_price !== null;
+      const priceToUse = isWholesale ? item.product.wholesale_price! : item.product.sale_price;
+      return { ...item, unit_price: priceToUse, is_wholesale_rate: !!isWholesale };
+    }));
+  }, [selectedCustomer]);
+
+  const cartTotals = useMemo(() => {
+    let subtotal = 0;
+    let taxTotal = 0;
+
+    const itemsForRpc = cart.map(item => {
+      const { unit_price, quantity, product } = item;
+      let basePrice = 0;
+      let taxAmount = 0;
+
+      if (product.gst_rate > 0) {
+        if (product.tax_inclusive) {
+          basePrice = unit_price / (1 + product.gst_rate / 100);
+          taxAmount = unit_price - basePrice;
+        } else {
+          basePrice = unit_price;
+          taxAmount = unit_price * (product.gst_rate / 100);
+        }
+      } else {
+        basePrice = unit_price;
+      }
+
+      const itemTotalBase = basePrice * quantity;
+      const itemTotalTax = taxAmount * quantity;
+
+      subtotal += itemTotalBase;
+      taxTotal += itemTotalTax;
+
+      return {
+        product_id: product.id,
+        quantity,
+        unit_price,
+        subtotal: unit_price * quantity,
+        tax_rate: product.gst_rate,
+        tax_amount: taxAmount * quantity,
+        tax_inclusive: product.tax_inclusive
+      };
+    });
+
+    let grandTotal = 0;
+    let pureTax = 0;
+
+    cart.forEach(item => {
+      const lineTotal = item.unit_price * item.quantity;
+      let lineTax = 0;
+      if (item.product.gst_rate > 0) {
+        if (item.product.tax_inclusive) {
+          lineTax = lineTotal - (lineTotal / (1 + item.product.gst_rate / 100));
+          grandTotal += lineTotal;
+        } else {
+          lineTax = lineTotal * (item.product.gst_rate / 100);
+          grandTotal += (lineTotal + lineTax);
+        }
+      } else {
+        grandTotal += lineTotal;
+      }
+      pureTax += lineTax;
+    });
+
+    return { grandTotal, taxTotal: pureTax, itemsForRpc };
+  }, [cart]);
+
+  const handleCheckout = async () => {
+    if (cart.length === 0) return;
+    if (paymentType === 'credit' && !selectedCustomer) {
+      setError('You must select a customer for Credit (Udhaar) sales.');
+      return;
+    }
+
+    setProcessing(true);
+    setError(null);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('process_checkout', {
+        p_business_id: businessInfo!.id,
+        p_customer_id: selectedCustomer?.id || null,
+        p_created_by: session!.uid,
+        p_payment_type: paymentType,
+        p_total_amount: cartTotals.grandTotal,
+        p_total_tax: cartTotals.taxTotal,
+        p_items: cartTotals.itemsForRpc
+      });
+
+      if (rpcError) throw rpcError;
+
+      // Reset
+      setCart([]);
+      setSelectedCustomer(null);
+      setCheckoutModalVisible(false);
+      setCartModalVisible(false);
+      setPaymentType('cash');
+      Alert.alert('Success', 'Bill generated successfully!');
+    } catch (err: any) {
+      setError(err.message || 'Failed to process checkout');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   return (
-    <View>
-      <Text>New Sale</Text>
-    </View>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.kicker}>Billing</Text>
+          <Text style={styles.title}>Point of Sale</Text>
+        </View>
+      </View>
+
+      {/* Customer Picker */}
+      <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+        <TouchableOpacity style={styles.customerSelector} onPress={() => {
+          setCustomerSearchQuery('');
+          setCustomerModalVisible(true);
+        }}>
+          <Ionicons name="person" size={20} color={selectedCustomer ? Colors.accent : Colors.textSecondary} />
+          <View>
+            <Text style={styles.customerLabel}>Customer</Text>
+            <Text style={styles.customerName}>{selectedCustomer ? selectedCustomer.name : 'Walk-in (Retail)'}</Text>
+          </View>
+          <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} style={{ marginLeft: 'auto' }} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchSection}>
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={20} color={Colors.textSecondary} style={styles.searchIcon} />
+          <TextInput 
+            style={styles.searchInput} 
+            placeholder="Search products..." 
+            placeholderTextColor={Colors.textSecondary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={20} color={Colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Product Grid / List */}
+      <View style={styles.mainArea}>
+        <FlatList
+          data={searchedProducts}
+          keyExtractor={item => item.id}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.searchList}
+          renderItem={({ item }) => (
+            <TouchableOpacity style={styles.searchResultItem} onPress={() => addToCart(item)}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.searchResultName}>{item.name}</Text>
+                <Text style={styles.searchResultStock}>Stock: {item.stockCount}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={styles.searchResultPrice}>₹{item.sale_price.toFixed(2)}</Text>
+                {businessInfo?.business_type !== 'retail' && item.wholesale_price !== null && (
+                  <Text style={styles.searchResultWholesale}>Wholesale: ₹{item.wholesale_price.toFixed(2)}</Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={styles.emptySearchText}>{products.length === 0 ? "You have no active products. Add some in the Products tab." : "No products match your search."}</Text>
+          }
+        />
+      </View>
+
+      {/* Sticky Cart Footer Bar */}
+      {cart.length > 0 && (
+        <View style={styles.stickyCartFooter}>
+          <View>
+            <Text style={styles.stickyCartText}>{cart.length} Item{cart.length > 1 ? 's' : ''}</Text>
+            <Text style={styles.stickyCartTotal}>₹{cartTotals.grandTotal.toFixed(2)}</Text>
+          </View>
+          <TouchableOpacity style={styles.stickyCartBtn} onPress={() => setCartModalVisible(true)}>
+            <Text style={styles.stickyCartBtnText}>View Cart</Text>
+            <Ionicons name="arrow-forward" size={20} color={Colors.bg} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Cart Modal */}
+      <Modal visible={cartModalVisible} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Your Cart</Text>
+            <TouchableOpacity onPress={() => setCartModalVisible(false)} style={styles.modalClose}>
+              <Ionicons name="close" size={24} color={Colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={cart}
+            keyExtractor={item => item.product.id}
+            contentContainerStyle={styles.cartList}
+            renderItem={({ item }) => (
+              <View style={styles.cartItem}>
+                <View style={styles.cartItemMain}>
+                  <Text style={styles.cartItemName}>{item.product.name}</Text>
+                  <Text style={styles.cartItemPrice}>
+                    ₹{item.unit_price.toFixed(2)} {businessInfo?.business_type === 'both' && item.is_wholesale_rate && <Text style={styles.wholesaleBadge}>(Wholesale)</Text>}
+                  </Text>
+                  {item.product.gst_rate > 0 && (
+                    <Text style={styles.cartItemTax}>
+                      +{item.product.gst_rate}% GST {item.product.tax_inclusive ? '(Inc)' : '(Exc)'}
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.qtyControl}>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(item.product.id, -1)}>
+                    <Ionicons name="remove" size={20} color={Colors.textPrimary} />
+                  </TouchableOpacity>
+                  <Text style={styles.qtyText}>{item.quantity}</Text>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(item.product.id, 1)}>
+                    <Ionicons name="add" size={20} color={Colors.textPrimary} />
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity style={styles.deleteBtn} onPress={() => removeFromCart(item.product.id)}>
+                  <Ionicons name="trash-outline" size={20} color={Colors.warn} />
+                </TouchableOpacity>
+              </View>
+            )}
+            ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 20 }}>Cart is empty</Text>}
+          />
+          {cart.length > 0 && (
+            <View style={styles.checkoutFooter}>
+              <View style={styles.totalsRow}>
+                <Text style={styles.totalsLabel}>GST Amount</Text>
+                <Text style={styles.totalsValue}>₹{cartTotals.taxTotal.toFixed(2)}</Text>
+              </View>
+              <View style={[styles.totalsRow, { marginBottom: 16 }]}>
+                <Text style={styles.grandTotalLabel}>Grand Total</Text>
+                <Text style={styles.grandTotalValue}>₹{cartTotals.grandTotal.toFixed(2)}</Text>
+              </View>
+              <TouchableOpacity style={styles.chargeButton} onPress={() => setCheckoutModalVisible(true)}>
+                <Text style={styles.chargeButtonText}>Charge ₹{cartTotals.grandTotal.toFixed(2)}</Text>
+                <Ionicons name="arrow-forward" size={20} color={Colors.bg} />
+              </TouchableOpacity>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* Customer Selection Modal */}
+      <Modal visible={customerModalVisible} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Select Customer</Text>
+            <TouchableOpacity onPress={() => setCustomerModalVisible(false)} style={styles.modalClose}>
+              <Ionicons name="close" size={24} color={Colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.searchSection}>
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={20} color={Colors.textSecondary} style={styles.searchIcon} />
+              <TextInput 
+                style={styles.searchInput} 
+                placeholder="Search by name..." 
+                placeholderTextColor={Colors.textSecondary}
+                value={customerSearchQuery}
+                onChangeText={setCustomerSearchQuery}
+              />
+              {customerSearchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setCustomerSearchQuery('')}>
+                  <Ionicons name="close-circle" size={20} color={Colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          <FlatList
+            data={filteredCustomers}
+            keyExtractor={c => c.id}
+            ListHeaderComponent={
+              !customerSearchQuery ? (
+                <TouchableOpacity style={styles.customerRow} onPress={() => { setSelectedCustomer(null); setCustomerModalVisible(false); }}>
+                  <View style={[styles.customerAvatar, { backgroundColor: Colors.surfaceRaised }]}>
+                    <Ionicons name="walk" size={20} color={Colors.textSecondary} />
+                  </View>
+                  <View>
+                    <Text style={styles.customerRowName}>Walk-in Customer</Text>
+                    <Text style={styles.customerRowType}>Retail</Text>
+                  </View>
+                </TouchableOpacity>
+              ) : null
+            }
+            renderItem={({ item }) => (
+              <TouchableOpacity style={styles.customerRow} onPress={() => { setSelectedCustomer(item); setCustomerModalVisible(false); }}>
+                <View style={styles.customerAvatar}>
+                  <Text style={styles.customerAvatarText}>{item.name.charAt(0).toUpperCase()}</Text>
+                </View>
+                <View>
+                  <Text style={styles.customerRowName}>{item.name}</Text>
+                  <Text style={styles.customerRowType}>{item.customer_type.toUpperCase()}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <View style={styles.emptyCustomerContainer}>
+                <Text style={styles.emptyCustomerText}>No customer found.</Text>
+                <TouchableOpacity style={styles.addCustomerBtn} onPress={() => setAddCustomerModalVisible(true)}>
+                  <Ionicons name="person-add" size={18} color={Colors.bg} />
+                  <Text style={styles.addCustomerBtnText}>Add New Customer</Text>
+                </TouchableOpacity>
+              </View>
+            }
+          />
+        </SafeAreaView>
+      </Modal>
+
+      {/* Add New Customer Sub-Modal */}
+      <Modal visible={addCustomerModalVisible} animationType="fade" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.checkoutOverlay}>
+          <View style={styles.checkoutSheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>New Customer</Text>
+              <TouchableOpacity onPress={() => setAddCustomerModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ marginBottom: 16 }}>
+              <Text style={styles.inputLabel}>Customer Name *</Text>
+              <TextInput style={styles.inputField} value={newCustomerName} onChangeText={setNewCustomerName} placeholder="E.g. Ramesh" placeholderTextColor={Colors.textSecondary} />
+            </View>
+            <View style={{ marginBottom: 24 }}>
+              <Text style={styles.inputLabel}>Phone Number (Optional)</Text>
+              <TextInput style={styles.inputField} value={newCustomerPhone} onChangeText={setNewCustomerPhone} placeholder="E.g. 9876543210" keyboardType="phone-pad" placeholderTextColor={Colors.textSecondary} />
+            </View>
+            {businessInfo?.business_type === 'both' && (
+              <View style={{ marginBottom: 32 }}>
+                <Text style={styles.inputLabel}>Customer Type</Text>
+                <View style={styles.typeToggleContainer}>
+                  <TouchableOpacity style={[styles.typeToggleBtn, newCustomerType === 'retail' && styles.typeToggleBtnActive]} onPress={() => setNewCustomerType('retail')}>
+                    <Text style={[styles.typeToggleText, newCustomerType === 'retail' && styles.typeToggleTextActive]}>Retail</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.typeToggleBtn, newCustomerType === 'wholesale' && styles.typeToggleBtnActive]} onPress={() => setNewCustomerType('wholesale')}>
+                    <Text style={[styles.typeToggleText, newCustomerType === 'wholesale' && styles.typeToggleTextActive]}>Wholesale</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            <TouchableOpacity style={styles.confirmButton} onPress={handleCreateCustomer} disabled={creatingCustomer}>
+              {creatingCustomer ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.confirmButtonText}>Save & Select Customer</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Checkout Payment Modal */}
+      <Modal visible={checkoutModalVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.checkoutOverlay}>
+          <View style={styles.checkoutSheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Checkout</Text>
+              <TouchableOpacity onPress={() => setCheckoutModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.checkoutAmount}>₹{cartTotals.grandTotal.toFixed(2)}</Text>
+
+            <Text style={styles.paymentMethodLabel}>Select Payment Method</Text>
+            <View style={styles.paymentMethods}>
+              <TouchableOpacity style={[styles.paymentBtn, paymentType === 'cash' && styles.paymentBtnActive]} onPress={() => setPaymentType('cash')}>
+                <Ionicons name="cash" size={24} color={paymentType === 'cash' ? Colors.bg : Colors.textPrimary} />
+                <Text style={[styles.paymentBtnText, paymentType === 'cash' && styles.paymentBtnTextActive]}>Cash</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.paymentBtn, paymentType === 'upi' && styles.paymentBtnActive]} onPress={() => setPaymentType('upi')}>
+                <Ionicons name="qr-code" size={24} color={paymentType === 'upi' ? Colors.bg : Colors.textPrimary} />
+                <Text style={[styles.paymentBtnText, paymentType === 'upi' && styles.paymentBtnTextActive]}>UPI</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.paymentBtn, paymentType === 'credit' && styles.paymentBtnActive]} onPress={() => setPaymentType('credit')}>
+                <Ionicons name="book" size={24} color={paymentType === 'credit' ? Colors.bg : Colors.warn} />
+                <Text style={[styles.paymentBtnText, paymentType === 'credit' && styles.paymentBtnTextActive]}>Udhaar</Text>
+              </TouchableOpacity>
+            </View>
+
+            {error && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.confirmButton} onPress={handleCheckout} disabled={processing}>
+              {processing ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.confirmButtonText}>Confirm & Print Bill</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.bg },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
+  kicker: { fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase', color: Colors.accentInk, marginBottom: 4, fontWeight: '600' },
+  title: { fontSize: 28, fontWeight: '700', color: Colors.textPrimary },
+  customerSelector: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
+  customerLabel: { fontSize: 11, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  customerName: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary },
+  searchSection: { padding: 16, paddingBottom: 0 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 12, height: 50, borderWidth: 1, borderColor: Colors.border },
+  searchIcon: { marginRight: 8 },
+  searchInput: { flex: 1, fontSize: 16, color: Colors.textPrimary },
+  mainArea: { flex: 1 },
+  searchList: { padding: 16, gap: 8 },
+  searchResultItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
+  searchResultName: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary, marginBottom: 4 },
+  searchResultStock: { fontSize: 13, color: Colors.textSecondary },
+  searchResultPrice: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, textAlign: 'right' },
+  searchResultWholesale: { fontSize: 11, color: Colors.accent, marginTop: 4, textAlign: 'right' },
+  emptySearchText: { textAlign: 'center', color: Colors.textSecondary, marginTop: 24 },
+  
+  // Cart Sticky Footer
+  stickyCartFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: Colors.surfaceRaised, padding: 16, paddingBottom: Platform.OS === 'ios' ? 32 : 16, borderTopWidth: 1, borderTopColor: Colors.border },
+  stickyCartText: { fontSize: 14, color: Colors.textSecondary },
+  stickyCartTotal: { fontSize: 20, fontWeight: '700', color: Colors.textPrimary },
+  stickyCartBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.accent, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, gap: 8 },
+  stickyCartBtnText: { color: Colors.bg, fontSize: 16, fontWeight: '700' },
+  
+  cartList: { padding: 16, gap: 12 },
+  cartItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
+  cartItemMain: { flex: 1 },
+  cartItemName: { fontSize: 15, fontWeight: '600', color: Colors.textPrimary, marginBottom: 4 },
+  cartItemPrice: { fontSize: 14, color: Colors.textPrimary, fontWeight: '500' },
+  wholesaleBadge: { color: Colors.accent, fontSize: 11 },
+  cartItemTax: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  qtyControl: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.bg, borderRadius: 8, borderWidth: 1, borderColor: Colors.border, marginHorizontal: 12 },
+  qtyBtn: { padding: 8 },
+  qtyText: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary, width: 24, textAlign: 'center' },
+  deleteBtn: { padding: 8 },
+  
+  checkoutFooter: { backgroundColor: Colors.surface, padding: 20, borderTopWidth: 1, borderTopColor: Colors.border, paddingBottom: Platform.OS === 'ios' ? 32 : 20 },
+  totalsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  totalsLabel: { fontSize: 14, color: Colors.textSecondary },
+  totalsValue: { fontSize: 14, color: Colors.textPrimary, fontWeight: '500' },
+  grandTotalLabel: { fontSize: 18, fontWeight: '600', color: Colors.textPrimary },
+  grandTotalValue: { fontSize: 24, fontWeight: '700', color: Colors.textPrimary },
+  chargeButton: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.accent, padding: 16, borderRadius: 12, gap: 8 },
+  chargeButtonText: { color: Colors.bg, fontSize: 18, fontWeight: '700' },
+  
+  modalContainer: { flex: 1, backgroundColor: Colors.bg },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  modalTitle: { fontSize: 18, fontWeight: '600', color: Colors.textPrimary },
+  modalClose: { padding: 4 },
+  customerRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  customerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.accent, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  customerAvatarText: { color: Colors.bg, fontSize: 18, fontWeight: '600' },
+  customerRowName: { fontSize: 16, fontWeight: '500', color: Colors.textPrimary },
+  customerRowType: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  emptyCustomerContainer: { padding: 32, alignItems: 'center' },
+  emptyCustomerText: { fontSize: 16, color: Colors.textSecondary, marginBottom: 16 },
+  addCustomerBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.accent, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, gap: 8 },
+  addCustomerBtnText: { color: Colors.bg, fontSize: 16, fontWeight: '600' },
+  
+  inputLabel: { fontSize: 14, color: Colors.textSecondary, marginBottom: 8, fontWeight: '500' },
+  inputField: { backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 16, fontSize: 16, color: Colors.textPrimary },
+  typeToggleContainer: { flexDirection: 'row', backgroundColor: Colors.bg, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
+  typeToggleBtn: { flex: 1, padding: 14, alignItems: 'center' },
+  typeToggleBtnActive: { backgroundColor: Colors.surfaceRaised },
+  typeToggleText: { fontSize: 14, fontWeight: '600', color: Colors.textSecondary },
+  typeToggleTextActive: { color: Colors.textPrimary },
+  
+  checkoutOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  checkoutSheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
+  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  sheetTitle: { fontSize: 20, fontWeight: '700', color: Colors.textPrimary },
+  checkoutAmount: { fontSize: 48, fontWeight: '700', color: Colors.textPrimary, textAlign: 'center', marginBottom: 32 },
+  paymentMethodLabel: { fontSize: 14, fontWeight: '600', color: Colors.textSecondary, marginBottom: 12 },
+  paymentMethods: { flexDirection: 'row', gap: 12, marginBottom: 32 },
+  paymentBtn: { flex: 1, alignItems: 'center', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, gap: 8 },
+  paymentBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  paymentBtnText: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
+  paymentBtnTextActive: { color: Colors.bg },
+  errorBox: { backgroundColor: 'rgba(201, 162, 39, 0.1)', padding: 12, borderRadius: 8, marginBottom: 16, borderLeftWidth: 3, borderLeftColor: Colors.warn },
+  errorText: { color: Colors.textPrimary, fontSize: 13 },
+  confirmButton: { backgroundColor: Colors.ok, height: 56, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  confirmButtonText: { color: Colors.bg, fontSize: 18, fontWeight: '700' }
+});

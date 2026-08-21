@@ -8,6 +8,11 @@ import { getFirebaseAuth } from '@/lib/firebase';
 import { clearPendingOtp, getPendingOtp, setPendingOtp } from '@/lib/otpSession';
 import { supabase } from '@/lib/supabase';
 
+export type BusinessInfo = {
+  id: string;
+  business_type: 'retail' | 'wholesale' | 'both';
+};
+
 export async function sendPhoneOtp(phone: string, verifier: ApplicationVerifier) {
   const auth = getFirebaseAuth();
   const provider = new PhoneAuthProvider(auth);
@@ -29,18 +34,34 @@ export async function verifyPhoneOtp(token: string) {
   return { session: result.user };
 }
 
-export async function userHasBusiness(userId: string): Promise<boolean> {
+export async function userHasBusiness(userId: string): Promise<BusinessInfo | null> {
   const { data, error } = await supabase
     .from('business_users')
-    .select('id')
+    .select(`
+      business_id,
+      businesses (
+        id,
+        business_type
+      )
+    `)
     .eq('user_id', userId)
-    .limit(1);
+    .limit(1)
+    .single();
 
-  if (error) {
-    throw error;
+  if (error || !data) {
+    return null;
   }
 
-  return (data?.length ?? 0) > 0;
+  // The inner join returns businesses as an object or array depending on relation setup,
+  // but since business_users -> businesses is a Many-to-One, it returns a single object.
+  const business = Array.isArray(data.businesses) ? data.businesses[0] : data.businesses;
+  
+  if (!business) return null;
+
+  return {
+    id: business.id,
+    business_type: business.business_type as 'retail' | 'wholesale' | 'both',
+  };
 }
 
 export function authErrorMessage(error: unknown, fallback: string): string {

@@ -79,7 +79,7 @@ CREATE TABLE public.sales (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES public.businesses (id) ON DELETE CASCADE,
   customer_id uuid REFERENCES public.customers (id) ON DELETE RESTRICT,
-  created_by uuid NOT NULL REFERENCES auth.users (id) ON DELETE RESTRICT,
+  created_by text NOT NULL,
   total_amount numeric(12, 2) NOT NULL,
   payment_type public.sale_payment_type NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -102,7 +102,7 @@ CREATE TABLE public.purchases (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES public.businesses (id) ON DELETE CASCADE,
   supplier_id uuid NOT NULL REFERENCES public.suppliers (id) ON DELETE RESTRICT,
-  created_by uuid NOT NULL REFERENCES auth.users (id) ON DELETE RESTRICT,
+  created_by text NOT NULL,
   total_amount numeric(12, 2) NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT purchases_total_non_negative CHECK (total_amount >= 0)
