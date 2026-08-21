@@ -50,6 +50,7 @@ export default function ProductsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   
   // Form State
   const [formName, setFormName] = useState('');
@@ -153,6 +154,7 @@ export default function ProductsScreen() {
     setFormBarcode('');
     setFormOpeningStock('');
     setFormError(null);
+    setShowAdvancedOptions(false);
     setModalVisible(true);
   };
 
@@ -175,6 +177,16 @@ export default function ProductsScreen() {
     setFormOpeningStock(product.stockCount.toString());
     setOriginalStock(product.stockCount);
     setFormError(null);
+    
+    const hasAdvancedData = Boolean(
+      product.barcode || 
+      product.gst_rate > 0 || 
+      product.hsn_code || 
+      product.wholesale_price || 
+      product.low_stock_threshold !== 5
+    );
+    setShowAdvancedOptions(hasAdvancedData);
+    
     setModalVisible(true);
   };
 
@@ -440,14 +452,10 @@ export default function ProductsScreen() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              {/* --- THE ESSENTIALS --- */}
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Product Name *</Text>
                 <TextInput style={styles.input} value={formName} onChangeText={setFormName} placeholder="e.g. Tata Salt 1kg" placeholderTextColor={Colors.textSecondary} />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Barcode / SKU (Optional)</Text>
-                <TextInput style={styles.input} value={formBarcode} onChangeText={setFormBarcode} placeholder="Scan or enter barcode" placeholderTextColor={Colors.textSecondary} />
               </View>
 
               <View style={styles.formGroup}>
@@ -500,58 +508,6 @@ export default function ProductsScreen() {
 
               <View style={styles.row}>
                 <View style={[styles.formGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>{editingId ? 'Current Stock' : 'Opening Stock'}</Text>
-                  <TextInput style={styles.input} value={formOpeningStock} onChangeText={setFormOpeningStock} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textSecondary} />
-                </View>
-                <View style={[styles.formGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Low Stock Alert *</Text>
-                  <TextInput style={styles.input} value={formLowStockThreshold} onChangeText={setFormLowStockThreshold} keyboardType="numeric" placeholder="e.g. 5" placeholderTextColor={Colors.textSecondary} />
-                </View>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.sectionDivider}>GST & Tax Details</Text>
-                <View style={styles.row}>
-                  <View style={[styles.formGroup, { flex: 1 }]}>
-                    <Text style={styles.label}>HSN / SAC Code</Text>
-                    <TextInput style={styles.input} value={formHsnCode} onChangeText={setFormHsnCode} placeholder="e.g. 1006" placeholderTextColor={Colors.textSecondary} />
-                  </View>
-                  <View style={[styles.formGroup, { flex: 1 }]}>
-                    <Text style={styles.label}>GST Rate %</Text>
-                    <View style={styles.unitSelector}>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                        {GST_RATES.map(rate => (
-                          <TouchableOpacity key={rate} style={[styles.unitChip, formGstRate === rate && styles.unitChipActive]} onPress={() => setFormGstRate(rate)}>
-                            <Text style={[styles.unitChipText, formGstRate === rate && styles.unitChipTextActive]}>{rate}%</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  </View>
-                </View>
-                
-                <View style={styles.unitTypeToggle}>
-                  <TouchableOpacity style={[styles.toggleBtn, formTaxInclusive && styles.toggleBtnActive]} onPress={() => setFormTaxInclusive(true)}>
-                    <Text style={[styles.toggleBtnText, formTaxInclusive && styles.toggleBtnTextActive]}>Inclusive of Tax</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.toggleBtn, !formTaxInclusive && styles.toggleBtnActive]} onPress={() => setFormTaxInclusive(false)}>
-                    <Text style={[styles.toggleBtnText, !formTaxInclusive && styles.toggleBtnTextActive]}>Exclusive of Tax</Text>
-                  </TouchableOpacity>
-                </View>
-                
-                {formGstRate > 0 && formSalePrice && !isNaN(parseFloat(formSalePrice)) && (
-                  <View style={styles.taxPreview}>
-                    {formTaxInclusive ? (
-                      <Text style={styles.taxPreviewText}>Base: ₹{(parseFloat(formSalePrice) * 100 / (100 + formGstRate)).toFixed(2)} | Tax: ₹{(parseFloat(formSalePrice) - (parseFloat(formSalePrice) * 100 / (100 + formGstRate))).toFixed(2)}</Text>
-                    ) : (
-                      <Text style={styles.taxPreviewText}>Tax: ₹{(parseFloat(formSalePrice) * formGstRate / 100).toFixed(2)} | Total: ₹{(parseFloat(formSalePrice) * (1 + formGstRate / 100)).toFixed(2)}</Text>
-                    )}
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.row}>
-                <View style={[styles.formGroup, { flex: 1 }]}>
                   <Text style={styles.label}>Purchase Price (₹) *</Text>
                   <TextInput style={styles.input} value={formPurchasePrice} onChangeText={setFormPurchasePrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={Colors.textSecondary} />
                 </View>
@@ -561,19 +517,92 @@ export default function ProductsScreen() {
                 </View>
               </View>
 
-              {(businessInfo?.business_type === 'wholesale' || businessInfo?.business_type === 'both') && (
-                <View style={styles.wholesaleContainer}>
-                  <Text style={styles.sectionDivider}>Wholesale Options</Text>
-                  <View style={styles.row}>
-                    <View style={[styles.formGroup, { flex: 1 }]}>
-                      <Text style={styles.label}>Wholesale Price</Text>
-                      <TextInput style={styles.input} value={formWholesalePrice} onChangeText={setFormWholesalePrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={Colors.textSecondary} />
-                    </View>
-                    <View style={[styles.formGroup, { flex: 1 }]}>
-                      <Text style={styles.label}>Min Qty (MOQ)</Text>
-                      <TextInput style={styles.input} value={formMoq} onChangeText={setFormMoq} keyboardType="numeric" placeholder="10" placeholderTextColor={Colors.textSecondary} />
-                    </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>{editingId ? 'Current Stock' : 'Opening Stock'}</Text>
+                <TextInput style={styles.input} value={formOpeningStock} onChangeText={setFormOpeningStock} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textSecondary} />
+              </View>
+
+              {/* --- TOGGLE BUTTON --- */}
+              <TouchableOpacity 
+                style={styles.advancedToggleBtn} 
+                onPress={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name={showAdvancedOptions ? "chevron-up" : "chevron-down"} size={20} color={Colors.accent} />
+                <Text style={styles.advancedToggleText}>
+                  {showAdvancedOptions ? "Hide Advanced Details" : "Add Advanced Details (Barcode, Tax, Wholesale)"}
+                </Text>
+              </TouchableOpacity>
+
+              {/* --- ADVANCED DETAILS --- */}
+              {showAdvancedOptions && (
+                <View style={styles.advancedSection}>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.label}>Barcode / SKU (Optional)</Text>
+                    <TextInput style={styles.input} value={formBarcode} onChangeText={setFormBarcode} placeholder="Scan or enter barcode" placeholderTextColor={Colors.textSecondary} />
                   </View>
+
+                  <View style={styles.formGroup}>
+                    <Text style={styles.label}>Low Stock Alert *</Text>
+                    <TextInput style={styles.input} value={formLowStockThreshold} onChangeText={setFormLowStockThreshold} keyboardType="numeric" placeholder="e.g. 5" placeholderTextColor={Colors.textSecondary} />
+                  </View>
+
+                  <View style={styles.formGroup}>
+                    <Text style={styles.sectionDivider}>GST & Tax Details</Text>
+                    <View style={styles.row}>
+                      <View style={[styles.formGroup, { flex: 1 }]}>
+                        <Text style={styles.label}>HSN / SAC Code</Text>
+                        <TextInput style={styles.input} value={formHsnCode} onChangeText={setFormHsnCode} placeholder="e.g. 1006" placeholderTextColor={Colors.textSecondary} />
+                      </View>
+                      <View style={[styles.formGroup, { flex: 1 }]}>
+                        <Text style={styles.label}>GST Rate %</Text>
+                        <View style={styles.unitSelector}>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                            {GST_RATES.map(rate => (
+                              <TouchableOpacity key={rate} style={[styles.unitChip, formGstRate === rate && styles.unitChipActive]} onPress={() => setFormGstRate(rate)}>
+                                <Text style={[styles.unitChipText, formGstRate === rate && styles.unitChipTextActive]}>{rate}%</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+                        </View>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.unitTypeToggle}>
+                      <TouchableOpacity style={[styles.toggleBtn, formTaxInclusive && styles.toggleBtnActive]} onPress={() => setFormTaxInclusive(true)}>
+                        <Text style={[styles.toggleBtnText, formTaxInclusive && styles.toggleBtnTextActive]}>Inclusive of Tax</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.toggleBtn, !formTaxInclusive && styles.toggleBtnActive]} onPress={() => setFormTaxInclusive(false)}>
+                        <Text style={[styles.toggleBtnText, !formTaxInclusive && styles.toggleBtnTextActive]}>Exclusive of Tax</Text>
+                      </TouchableOpacity>
+                    </View>
+                    
+                    {formGstRate > 0 && formSalePrice && !isNaN(parseFloat(formSalePrice)) && (
+                      <View style={styles.taxPreview}>
+                        {formTaxInclusive ? (
+                          <Text style={styles.taxPreviewText}>Base: ₹{(parseFloat(formSalePrice) * 100 / (100 + formGstRate)).toFixed(2)} | Tax: ₹{(parseFloat(formSalePrice) - (parseFloat(formSalePrice) * 100 / (100 + formGstRate))).toFixed(2)}</Text>
+                        ) : (
+                          <Text style={styles.taxPreviewText}>Tax: ₹{(parseFloat(formSalePrice) * formGstRate / 100).toFixed(2)} | Total: ₹{(parseFloat(formSalePrice) * (1 + formGstRate / 100)).toFixed(2)}</Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+
+                  {(businessInfo?.business_type === 'wholesale' || businessInfo?.business_type === 'both') && (
+                    <View style={styles.wholesaleContainer}>
+                      <Text style={styles.sectionDivider}>Wholesale Options</Text>
+                      <View style={styles.row}>
+                        <View style={[styles.formGroup, { flex: 1 }]}>
+                          <Text style={styles.label}>Wholesale Price</Text>
+                          <TextInput style={styles.input} value={formWholesalePrice} onChangeText={setFormWholesalePrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={Colors.textSecondary} />
+                        </View>
+                        <View style={[styles.formGroup, { flex: 1 }]}>
+                          <Text style={styles.label}>Min Qty (MOQ)</Text>
+                          <TextInput style={styles.input} value={formMoq} onChangeText={setFormMoq} keyboardType="numeric" placeholder="10" placeholderTextColor={Colors.textSecondary} />
+                        </View>
+                      </View>
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -638,8 +667,13 @@ const styles = StyleSheet.create({
   unitChip: { paddingHorizontal: 16, height: 40, justifyContent: 'center', backgroundColor: Colors.surfaceRaised, borderRadius: 20, borderWidth: 1, borderColor: Colors.border },
   unitChipActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   unitChipText: { color: Colors.textSecondary, fontWeight: '500' },
-  unitChipTextActive: { color: Colors.bg, fontWeight: '700' },
-  cancelCustomButton: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 12, backgroundColor: Colors.surfaceRaised, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
+  unitChipTextActive: { color: Colors.bg, fontWeight: '600' },
+  cancelCustomButton: { padding: 12, backgroundColor: Colors.surface, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  
+  advancedToggleBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, marginTop: 8, marginBottom: 16, backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, borderStyle: 'dashed' },
+  advancedToggleText: { color: Colors.accent, fontWeight: '600', marginLeft: 8 },
+  advancedSection: { padding: 16, backgroundColor: Colors.surface, borderRadius: 12, marginBottom: 24, borderWidth: 1, borderColor: Colors.border },
+
   unitTypeToggle: { flexDirection: 'row', backgroundColor: Colors.surfaceRaised, borderRadius: 8, padding: 4 },
   toggleBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
   toggleBtnActive: { backgroundColor: Colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
