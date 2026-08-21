@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { 
   StyleSheet, Text, View, FlatList, TouchableOpacity, 
   TextInput, ActivityIndicator, Modal, KeyboardAvoidingView, 
-  Platform, ScrollView, RefreshControl 
+  Platform, ScrollView, RefreshControl, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useFocusEffect } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
@@ -48,6 +50,8 @@ export default function ProductsScreen() {
 
   // Modal State
   const [modalVisible, setModalVisible] = useState(false);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
@@ -193,6 +197,17 @@ export default function ProductsScreen() {
   const closeForm = () => {
     setModalVisible(false);
     setSaving(false);
+  };
+
+  const openScanner = async () => {
+    if (!permission?.granted) {
+      const { granted } = await requestPermission();
+      if (!granted) {
+        Alert.alert('Permission needed', 'Camera permission is required to scan barcodes');
+        return;
+      }
+    }
+    setScannerVisible(true);
   };
 
   const onSubmitForm = async () => {
@@ -539,7 +554,15 @@ export default function ProductsScreen() {
                 <View style={styles.advancedSection}>
                   <View style={styles.formGroup}>
                     <Text style={styles.label}>Barcode / SKU (Optional)</Text>
-                    <TextInput style={styles.input} value={formBarcode} onChangeText={setFormBarcode} placeholder="Scan or enter barcode" placeholderTextColor={Colors.textSecondary} />
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TextInput style={[styles.input, { flex: 1 }]} value={formBarcode} onChangeText={setFormBarcode} placeholder="Scan or enter barcode" placeholderTextColor={Colors.textSecondary} />
+                      <TouchableOpacity 
+                        style={{ backgroundColor: Colors.accentDim, padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}
+                        onPress={openScanner}
+                      >
+                        <Ionicons name="barcode-outline" size={24} color={Colors.accent} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
 
                   <View style={styles.formGroup}>
@@ -617,6 +640,44 @@ export default function ProductsScreen() {
               </TouchableOpacity>
             </ScrollView>
           </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Scanner Modal */}
+      <Modal
+        visible={scannerVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setScannerVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.bg }}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Scan Barcode</Text>
+            <TouchableOpacity onPress={() => setScannerVisible(false)}>
+              <Ionicons name="close" size={24} color={Colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+          <View style={{ flex: 1, backgroundColor: '#000' }}>
+            {scannerVisible && (
+              <CameraView
+                style={{ flex: 1 }}
+                facing="back"
+                barcodeScannerSettings={{
+                  barcodeTypes: ["qr", "ean13", "ean8", "upc_a", "upc_e", "code128", "code39"]
+                }}
+                onBarcodeScanned={({ data }) => {
+                  setFormBarcode(data);
+                  setScannerVisible(false);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                }}
+              >
+                <View style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center' }}>
+                  <View style={{ width: 250, height: 250, borderWidth: 2, borderColor: Colors.accent, backgroundColor: 'transparent' }} />
+                  <Text style={{ color: '#fff', marginTop: 20, fontSize: 16 }}>Align barcode within the square</Text>
+                </View>
+              </CameraView>
+            )}
+          </View>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>

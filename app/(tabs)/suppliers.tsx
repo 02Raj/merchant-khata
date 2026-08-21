@@ -14,11 +14,10 @@ import { useAuth } from '@/context/AuthContext';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
 
-type Customer = {
+type Supplier = {
   id: string;
   name: string;
   phone: string;
-  customer_type: 'cash' | 'credit' | 'retail' | 'wholesale';
   balance: number; // calculated from ledger
 };
 
@@ -30,69 +29,75 @@ type LedgerEntry = {
   created_at: string;
 };
 
-export default function CustomersScreen() {
+export default function SuppliersScreen() {
   const { businessInfo } = useAuth();
   
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Add Customer Modal
+  // Add Supplier Modal
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [formName, setFormName] = useState('');
   const [formPhone, setFormPhone] = useState('');
-  const [savingCustomer, setSavingCustomer] = useState(false);
+  const [savingSupplier, setSavingSupplier] = useState(false);
 
   // Khata / Ledger Modal
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
   const [ledgerModalVisible, setLedgerModalVisible] = useState(false);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
 
-  // Payment Modal
+  // Payment Modal (Payment Out to Supplier)
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [processingPayment, setProcessingPayment] = useState(false);
 
-  const fetchCustomers = async (isRefreshing = false) => {
+  // Direct Purchase Modal
+  const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
+  const [purchaseAmount, setPurchaseAmount] = useState('');
+  const [processingPurchase, setProcessingPurchase] = useState(false);
+
+  const fetchSuppliers = async (isRefreshing = false) => {
     if (!businessInfo?.id) return;
     if (!isRefreshing) setLoading(true);
     
     try {
-      const { data: customersData, error: custError } = await supabase
-        .from('customers')
-        .select('id, name, phone, customer_type')
+      const { data: suppliersData, error: suppError } = await supabase
+        .from('suppliers')
+        .select('id, name, phone')
         .eq('business_id', businessInfo.id)
         .order('name');
 
-      if (custError) throw custError;
+      if (suppError) throw suppError;
 
       const { data: ledgerData, error: ledgerError } = await supabase
         .from('ledger_transactions')
-        .select('customer_id, amount, transaction_type')
+        .select('supplier_id, amount, transaction_type')
         .eq('business_id', businessInfo.id)
-        .not('customer_id', 'is', null);
+        .not('supplier_id', 'is', null);
 
       if (ledgerError) throw ledgerError;
 
       const balances: Record<string, number> = {};
+      // For suppliers: Credit = we owe them (Payable), Debit = we paid them or advance
       ledgerData.forEach(txn => {
-        const cid = txn.customer_id as string;
-        if (!balances[cid]) balances[cid] = 0;
-        if (txn.transaction_type === 'debit') balances[cid] += Number(txn.amount);
-        if (txn.transaction_type === 'credit') balances[cid] -= Number(txn.amount);
+        const sid = txn.supplier_id as string;
+        if (!balances[sid]) balances[sid] = 0;
+        if (txn.transaction_type === 'credit') balances[sid] += Number(txn.amount); // Payable increases
+        if (txn.transaction_type === 'debit') balances[sid] -= Number(txn.amount);  // Payable decreases
       });
 
-      const processedCustomers = customersData.map(c => ({
-        ...c,
-        balance: balances[c.id] || 0
+      const processedSuppliers = suppliersData.map(s => ({
+        ...s,
+        balance: balances[s.id] || 0
       }));
 
-      setCustomers(processedCustomers);
+      setSuppliers(processedSuppliers);
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      console.error('Error fetching suppliers:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -101,26 +106,25 @@ export default function CustomersScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      fetchCustomers();
+      fetchSuppliers();
     }, [businessInfo])
   );
 
-  const handleAddCustomer = async () => {
+  const handleAddSupplier = async () => {
     if (!formName.trim()) {
-      Alert.alert('Error', 'Customer name is required');
+      Alert.alert('Error', 'Supplier name is required');
       return;
     }
 
-    setSavingCustomer(true);
+    setSavingSupplier(true);
     try {
       const { error } = await supabase
-        .from('customers')
+        .from('suppliers')
         .insert({
           business_id: businessInfo!.id,
           name: formName.trim(),
           phone: formPhone.trim() || 'N/A',
-          address: 'N/A',
-          customer_type: businessInfo?.business_type === 'retail' ? 'retail' : 'wholesale'
+          address: 'N/A'
         });
 
       if (error) throw error;
@@ -129,18 +133,18 @@ export default function CustomersScreen() {
       setAddModalVisible(false);
       setFormName('');
       setFormPhone('');
-      fetchCustomers();
+      fetchSuppliers();
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', 'Failed to add customer');
+      Alert.alert('Error', 'Failed to add supplier');
       console.error(error);
     } finally {
-      setSavingCustomer(false);
+      setSavingSupplier(false);
     }
   };
 
-  const openCustomerKhata = async (customer: Customer) => {
-    setSelectedCustomer(customer);
+  const openSupplierKhata = async (supplier: Supplier) => {
+    setSelectedSupplier(supplier);
     setLedgerModalVisible(true);
     setLoadingLedger(true);
 
@@ -149,7 +153,7 @@ export default function CustomersScreen() {
         .from('ledger_transactions')
         .select('id, amount, transaction_type, source_type, created_at')
         .eq('business_id', businessInfo!.id)
-        .eq('customer_id', customer.id)
+        .eq('supplier_id', supplier.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -162,14 +166,71 @@ export default function CustomersScreen() {
   };
 
   const openPaymentModal = () => {
-    if (!selectedCustomer) return;
+    if (!selectedSupplier) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setPaymentAmount(selectedCustomer.balance > 0 ? selectedCustomer.balance.toString() : '');
+    setPaymentAmount(selectedSupplier.balance > 0 ? selectedSupplier.balance.toString() : '');
     setPaymentMethod('cash');
     setPaymentModalVisible(true);
   };
 
-  const handleReceivePayment = async () => {
+  const openPurchaseModal = () => {
+    if (!selectedSupplier) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPurchaseAmount('');
+    setPurchaseModalVisible(true);
+  };
+
+  const handleAddPurchase = async () => {
+    const amount = parseFloat(purchaseAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount');
+      return;
+    }
+
+    setProcessingPurchase(true);
+    try {
+      // 1. Create a Purchase record
+      const { data: purchaseData, error: purchaseError } = await supabase
+        .from('purchases')
+        .insert({
+          business_id: businessInfo!.id,
+          supplier_id: selectedSupplier!.id,
+          total_amount: amount,
+          created_by: 'owner'
+        })
+        .select('id')
+        .single();
+
+      if (purchaseError) throw purchaseError;
+
+      // 2. Add to Ledger (Credit - we owe them)
+      const { error: ledgerError } = await supabase
+        .from('ledger_transactions')
+        .insert({
+          business_id: businessInfo!.id,
+          supplier_id: selectedSupplier!.id,
+          amount: amount,
+          transaction_type: 'credit',
+          source_type: 'purchase',
+          source_id: purchaseData.id
+        });
+
+      if (ledgerError) throw ledgerError;
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setPurchaseModalVisible(false);
+      
+      setSelectedSupplier(prev => prev ? {...prev, balance: prev.balance + amount} : null);
+      await openSupplierKhata(selectedSupplier!);
+      fetchSuppliers();
+    } catch (error) {
+      console.error('Purchase error:', error);
+    } finally {
+      setProcessingPurchase(false);
+    }
+  };
+
+  const handlePaySupplier = async () => {
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert('Error', 'Please enter a valid amount');
@@ -178,15 +239,15 @@ export default function CustomersScreen() {
 
     setProcessingPayment(true);
     try {
-      // Insert Payment
+      // Insert Payment Out
       const { data: paymentData, error: paymentError } = await supabase
         .from('payments')
         .insert({
           business_id: businessInfo!.id,
-          related_type: 'customer',
-          related_id: selectedCustomer!.id,
+          related_type: 'supplier',
+          related_id: selectedSupplier!.id,
           amount: amount,
-          direction: 'received',
+          direction: 'paid',
           method: paymentMethod
         })
         .select('id')
@@ -194,14 +255,14 @@ export default function CustomersScreen() {
 
       if (paymentError) throw paymentError;
 
-      // Insert Ledger Credit
+      // Insert Ledger Debit (Reduces our payable)
       const { error: ledgerError } = await supabase
         .from('ledger_transactions')
         .insert({
           business_id: businessInfo!.id,
-          customer_id: selectedCustomer!.id,
+          supplier_id: selectedSupplier!.id,
           amount: amount,
-          transaction_type: 'credit',
+          transaction_type: 'debit',
           source_type: 'payment',
           source_id: paymentData.id
         });
@@ -211,12 +272,9 @@ export default function CustomersScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setPaymentModalVisible(false);
       
-      // Update local state temporarily so UI feels fast
-      setSelectedCustomer(prev => prev ? {...prev, balance: prev.balance - amount} : null);
-      
-      // Re-fetch data
-      await openCustomerKhata(selectedCustomer!);
-      fetchCustomers();
+      setSelectedSupplier(prev => prev ? {...prev, balance: prev.balance - amount} : null);
+      await openSupplierKhata(selectedSupplier!);
+      fetchSuppliers();
       
     } catch (error) {
       console.error('Payment error:', error);
@@ -225,19 +283,19 @@ export default function CustomersScreen() {
     }
   };
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    c.phone.includes(searchQuery)
+  const filteredSuppliers = suppliers.filter(s => 
+    s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    s.phone.includes(searchQuery)
   );
 
-  const totalReceivables = customers.reduce((sum, c) => c.balance > 0 ? sum + c.balance : sum, 0);
+  const totalPayables = suppliers.reduce((sum, s) => s.balance > 0 ? sum + s.balance : sum, 0);
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Customers (Khata)</Text>
-          <Text style={styles.subtitle}>Net Udhaar: ₹ {totalReceivables.toLocaleString('en-IN')}</Text>
+          <Text style={styles.title}>Suppliers</Text>
+          <Text style={styles.subtitle}>Total Payable: ₹ {totalPayables.toLocaleString('en-IN')}</Text>
         </View>
         <TouchableOpacity style={styles.addButton} onPress={() => setAddModalVisible(true)}>
           <Ionicons name="person-add" size={20} color={Colors.bg} />
@@ -269,18 +327,18 @@ export default function CustomersScreen() {
         </View>
       ) : (
         <FlatList
-          data={filteredCustomers}
+          data={filteredSuppliers}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchCustomers(true)} tintColor={Colors.accent} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchSuppliers(true)} tintColor={Colors.accent} />}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="people-outline" size={64} color={Colors.textSecondary} />
-              <Text style={styles.emptyText}>No customers found</Text>
+              <Ionicons name="bus-outline" size={64} color={Colors.textSecondary} />
+              <Text style={styles.emptyText}>No suppliers found</Text>
             </View>
           }
           renderItem={({ item }) => (
-            <TouchableOpacity style={styles.customerCard} onPress={() => openCustomerKhata(item)}>
+            <TouchableOpacity style={styles.customerCard} onPress={() => openSupplierKhata(item)}>
               <View style={styles.customerAvatar}>
                 <Text style={styles.customerInitials}>{item.name.substring(0, 2).toUpperCase()}</Text>
               </View>
@@ -292,7 +350,7 @@ export default function CustomersScreen() {
                 {item.balance > 0 ? (
                   <>
                     <Text style={styles.balanceAmountRed}>₹ {item.balance.toLocaleString('en-IN')}</Text>
-                    <Text style={styles.balanceLabel}>You'll Give</Text>
+                    <Text style={styles.balanceLabel}>Payable</Text>
                   </>
                 ) : item.balance < 0 ? (
                   <>
@@ -311,20 +369,20 @@ export default function CustomersScreen() {
         />
       )}
 
-      {/* ADD CUSTOMER MODAL */}
+      {/* ADD SUPPLIER MODAL */}
       <Modal visible={addModalVisible} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add New Customer</Text>
+              <Text style={styles.modalTitle}>Add New Supplier</Text>
               <TouchableOpacity onPress={() => setAddModalVisible(false)}>
                 <Ionicons name="close" size={24} color={Colors.textPrimary} />
               </TouchableOpacity>
             </View>
             
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Customer Name *</Text>
-              <TextInput style={styles.input} value={formName} onChangeText={setFormName} placeholder="Ramesh Kumar" />
+              <Text style={styles.label}>Supplier Name *</Text>
+              <TextInput style={styles.input} value={formName} onChangeText={setFormName} placeholder="Distributor Name" />
             </View>
             
             <View style={styles.formGroup}>
@@ -332,8 +390,8 @@ export default function CustomersScreen() {
               <TextInput style={styles.input} value={formPhone} onChangeText={setFormPhone} keyboardType="phone-pad" placeholder="9876543210" />
             </View>
             
-            <TouchableOpacity style={styles.submitBtn} onPress={handleAddCustomer} disabled={savingCustomer}>
-              {savingCustomer ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Save Customer</Text>}
+            <TouchableOpacity style={styles.submitBtn} onPress={handleAddSupplier} disabled={savingSupplier}>
+              {savingSupplier ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Save Supplier</Text>}
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -347,18 +405,18 @@ export default function CustomersScreen() {
               <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
             </TouchableOpacity>
             <View style={{ flex: 1, marginLeft: 16 }}>
-              <Text style={styles.modalTitle}>{selectedCustomer?.name}</Text>
-              <Text style={styles.subtitle}>{selectedCustomer?.phone}</Text>
+              <Text style={styles.modalTitle}>{selectedSupplier?.name}</Text>
+              <Text style={styles.subtitle}>{selectedSupplier?.phone}</Text>
             </View>
           </View>
 
           <View style={styles.ledgerBalanceHeader}>
-            <Text style={styles.ledgerBalanceLabel}>Net Balance</Text>
-            <Text style={[styles.ledgerBalanceAmount, selectedCustomer?.balance && selectedCustomer.balance > 0 ? { color: Colors.warn } : {}]}>
-              ₹ {selectedCustomer?.balance ? selectedCustomer.balance.toLocaleString('en-IN') : 0}
+            <Text style={styles.ledgerBalanceLabel}>Net Payable</Text>
+            <Text style={[styles.ledgerBalanceAmount, selectedSupplier?.balance && selectedSupplier.balance > 0 ? { color: Colors.warn } : {}]}>
+              ₹ {selectedSupplier?.balance ? selectedSupplier.balance.toLocaleString('en-IN') : 0}
             </Text>
             <Text style={styles.ledgerBalanceSub}>
-              {selectedCustomer?.balance && selectedCustomer.balance > 0 ? 'Customer owes you' : 'Settled'}
+              {selectedSupplier?.balance && selectedSupplier.balance > 0 ? 'You owe this supplier' : 'Settled'}
             </Text>
           </View>
 
@@ -376,50 +434,86 @@ export default function CustomersScreen() {
                 <View style={styles.ledgerItem}>
                   <View style={styles.ledgerIconContainer}>
                     <Ionicons 
-                      name={item.transaction_type === 'debit' ? "cart" : "cash"} 
+                      name={item.transaction_type === 'credit' ? "cart" : "cash"} 
                       size={20} 
-                      color={item.transaction_type === 'debit' ? Colors.warn : Colors.ok} 
+                      color={item.transaction_type === 'credit' ? Colors.warn : Colors.ok} 
                     />
                   </View>
                   <View style={styles.ledgerDetails}>
                     <Text style={styles.ledgerTitle}>
-                      {item.source_type === 'sale' ? 'Sale (Bill)' : 
-                       item.source_type === 'payment' ? 'Payment Received' : 'Entry'}
+                      {item.source_type === 'purchase' ? 'Purchase Bill' : 
+                       item.source_type === 'payment' ? 'Payment Out' : 'Entry'}
                     </Text>
                     <Text style={styles.ledgerDate}>
                       {new Date(item.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </Text>
                   </View>
-                  <Text style={[styles.ledgerAmount, { color: item.transaction_type === 'debit' ? Colors.warn : Colors.ok }]}>
-                    {item.transaction_type === 'debit' ? '+' : '-'} ₹ {Number(item.amount).toLocaleString('en-IN')}
+                  <Text style={[styles.ledgerAmount, { color: item.transaction_type === 'credit' ? Colors.warn : Colors.ok }]}>
+                    {item.transaction_type === 'credit' ? '+' : '-'} ₹ {Number(item.amount).toLocaleString('en-IN')}
                   </Text>
                 </View>
               )}
             />
           )}
 
-          <View style={styles.ledgerFooter}>
-            <TouchableOpacity style={styles.receivePaymentBtn} onPress={openPaymentModal}>
+          <View style={[styles.ledgerFooter, { flexDirection: 'row', gap: 12 }]}>
+            <TouchableOpacity style={[styles.receivePaymentBtn, { flex: 1, backgroundColor: Colors.warn }]} onPress={openPurchaseModal}>
+              <Ionicons name="cart" size={20} color={Colors.bg} />
+              <Text style={styles.receivePaymentBtnText}>Add Purchase</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.receivePaymentBtn, { flex: 1 }]} onPress={openPaymentModal}>
               <Ionicons name="cash" size={20} color={Colors.bg} />
-              <Text style={styles.receivePaymentBtnText}>Receive Payment</Text>
+              <Text style={styles.receivePaymentBtnText}>Pay Supplier</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
       </Modal>
 
-      {/* PAYMENT MODAL */}
+      {/* ADD PURCHASE MODAL */}
+      <Modal visible={purchaseModalVisible} animationType="fade" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Purchase Bill</Text>
+              <TouchableOpacity onPress={() => setPurchaseModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Bill Total Amount (₹)</Text>
+              <TextInput 
+                style={[styles.input, { fontSize: 24, fontWeight: '700', borderColor: Colors.warn, borderWidth: 2 }]} 
+                value={purchaseAmount} 
+                onChangeText={setPurchaseAmount} 
+                keyboardType="numeric" 
+                placeholder="0.00" 
+              />
+            </View>
+            <Text style={{ color: Colors.textSecondary, marginBottom: 20 }}>
+              * This will immediately add to your payable Khata. For inventory updates, you must edit product stock manually for now.
+            </Text>
+            
+            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: Colors.warn }]} onPress={handleAddPurchase} disabled={processingPurchase}>
+              {processingPurchase ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Confirm Purchase</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* PAYMENT OUT MODAL */}
       <Modal visible={paymentModalVisible} animationType="fade" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Payment In</Text>
+              <Text style={styles.modalTitle}>Payment Out</Text>
               <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
                 <Ionicons name="close" size={24} color={Colors.textPrimary} />
               </TouchableOpacity>
             </View>
             
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Amount Received (₹)</Text>
+              <Text style={styles.label}>Amount Paid (₹)</Text>
               <TextInput 
                 style={[styles.input, { fontSize: 24, fontWeight: '700' }]} 
                 value={paymentAmount} 
@@ -446,7 +540,7 @@ export default function CustomersScreen() {
               </View>
             </View>
             
-            <TouchableOpacity style={styles.submitBtn} onPress={handleReceivePayment} disabled={processingPayment}>
+            <TouchableOpacity style={styles.submitBtn} onPress={handlePaySupplier} disabled={processingPayment}>
               {processingPayment ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Confirm Payment</Text>}
             </TouchableOpacity>
           </View>

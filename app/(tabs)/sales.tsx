@@ -6,11 +6,16 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
-
+import * as Haptics from 'expo-haptics';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 type Customer = {
   id: string;
   name: string;
   customer_type: 'retail' | 'wholesale';
+  balance: number;
 };
 
 type Product = {
@@ -36,6 +41,10 @@ export default function SalesScreen() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   
+  // Camera Scanner
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scannerVisible, setScannerVisible] = useState(false);
+
   // Customer selection & creation state
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerModalVisible, setCustomerModalVisible] = useState(false);
@@ -70,12 +79,45 @@ export default function SalesScreen() {
   );
 
   const fetchCustomers = async (bizId: string) => {
-    const { data, error } = await supabase
+    const { data: customersData, error } = await supabase
       .from('customers')
       .select('id, name, customer_type')
       .eq('business_id', bizId)
       .order('name');
-    if (!error && data) setCustomers(data);
+      
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    // Now fetch balances from ledger
+    const { data: ledgerData, error: ledgerError } = await supabase
+      .from('ledger_transactions')
+      .select('customer_id, amount, transaction_type')
+      .eq('business_id', bizId)
+      .not('customer_id', 'is', null);
+
+    if (ledgerError) {
+      console.error(ledgerError);
+      return;
+    }
+
+    const balances: Record<string, number> = {};
+    if (ledgerData) {
+      ledgerData.forEach(txn => {
+        const cid = txn.customer_id as string;
+        if (!balances[cid]) balances[cid] = 0;
+        if (txn.transaction_type === 'debit') balances[cid] += Number(txn.amount);
+        if (txn.transaction_type === 'credit') balances[cid] -= Number(txn.amount);
+      });
+    }
+
+    const processedCustomers = customersData.map(c => ({
+      ...c,
+      balance: balances[c.id] || 0
+    }));
+
+    setCustomers(processedCustomers);
   };
 
   const fetchProducts = async (bizId: string) => {
@@ -131,8 +173,9 @@ export default function SalesScreen() {
       if (error) throw error;
       
       if (data) {
-        setCustomers(prev => [...prev, data]);
-        setSelectedCustomer(data);
+        const newCust = { ...data, balance: 0 };
+        setCustomers(prev => [...prev, newCust]);
+        setSelectedCustomer(newCust);
         setAddCustomerModalVisible(false);
         setCustomerModalVisible(false);
         setNewCustomerName('');
@@ -157,9 +200,48 @@ export default function SalesScreen() {
     return customers.filter(c => c.name.toLowerCase().includes(lower));
   }, [customerSearchQuery, customers]);
 
+  const handleBarcodeScanned = async ({ type, data }: { type: string, data: string }) => {
+    setScannerVisible(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
+    try {
+      const { data: productData } = await supabase
+        .from('products')
+        .select('id')
+        .eq('barcode', data)
+        .eq('business_id', businessInfo!.id)
+        .single();
+        
+      if (productData) {
+        const prod = products.find(p => p.id === productData.id);
+        if (prod) {
+          addToCart(prod);
+          return;
+        }
+      }
+      Alert.alert('Not Found', 'No product linked to this barcode.');
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Not Found', 'No product linked to this barcode.');
+    }
+  };
+
+  const openScanner = async () => {
+    if (!permission?.granted) {
+      const { granted } = await requestPermission();
+      if (!granted) {
+        Alert.alert('Permission needed', 'Camera permission is required to scan barcodes');
+        return;
+      }
+    }
+    setScannerVisible(true);
+  };
+
   const addToCart = (product: Product) => {
     const isWholesale = selectedCustomer?.customer_type === 'wholesale' && product.wholesale_price !== null;
     const priceToUse = isWholesale ? product.wholesale_price! : product.sale_price;
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     setCart(prev => {
       const existing = prev.find(item => item.product.id === product.id);
@@ -175,6 +257,7 @@ export default function SalesScreen() {
   };
 
   const updateQuantity = (productId: string, delta: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setCart(prev => prev.map(item => {
       if (item.product.id === productId) {
         const newQ = item.quantity + delta;
@@ -185,6 +268,7 @@ export default function SalesScreen() {
   };
 
   const removeFromCart = (productId: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     setCart(prev => prev.filter(item => item.product.id !== productId));
     if (cart.length === 1) {
       setCartModalVisible(false); // Close cart if last item is removed
@@ -283,27 +367,253 @@ export default function SalesScreen() {
 
       if (rpcError) throw rpcError;
 
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Prepare snapshot for printing before resetting
+      const printSnapshot = {
+        customer: selectedCustomer,
+        cart: [...cart],
+        totals: { ...cartTotals },
+        paymentType: paymentType,
+        date: new Date().toLocaleString('en-IN')
+      };
+
       // Reset
       setCart([]);
       setSelectedCustomer(null);
       setCheckoutModalVisible(false);
       setCartModalVisible(false);
       setPaymentType('cash');
-      Alert.alert('Success', 'Bill generated successfully!');
+      
+      Alert.alert(
+        'Success', 
+        'Bill generated successfully!',
+        [
+          { text: 'Print Receipt', onPress: () => printThermalReceipt(printSnapshot) },
+          { text: 'Share PDF', onPress: () => shareBillAsPDF(data, printSnapshot) },
+          { text: 'OK', style: 'cancel' }
+        ]
+      );
     } catch (err: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError(err.message || 'Failed to process checkout');
     } finally {
       setProcessing(false);
     }
   };
 
+  const shareBillAsPDF = async (saleId: string, snapshot: any) => {
+    try {
+      const isWholesaleCustomer = snapshot.customer?.customer_type === 'wholesale';
+      const previousBalance = snapshot.customer?.balance || 0;
+      const currentBillAmount = snapshot.totals.grandTotal;
+      const totalOutstanding = previousBalance + currentBillAmount;
+
+      const html = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; color: #333; }
+              .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+              .title { font-size: 24px; font-weight: bold; margin: 0; }
+              .subtitle { font-size: 14px; color: #666; margin-top: 5px; }
+              .customer { margin-bottom: 20px; font-size: 14px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+              th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+              th { background-color: #f8f8f8; font-weight: bold; }
+              .total-row { font-weight: bold; font-size: 16px; }
+              .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #888; }
+              .wholesale-badge { font-size: 10px; color: #c45c26; margin-left: 5px; border: 1px solid #c45c26; padding: 2px 4px; border-radius: 4px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <p class="title">${(businessInfo as any)?.name || 'Retail Invoice'}</p>
+              <p class="subtitle">${isWholesaleCustomer ? 'Wholesale Tax Invoice' : 'Tax Invoice'}</p>
+            </div>
+            
+            <div class="customer">
+              <strong>Customer:</strong> ${snapshot.customer ? snapshot.customer.name : 'Walk-in (Retail)'}<br/>
+              <strong>Date:</strong> ${snapshot.date}<br/>
+              <strong>Payment Mode:</strong> ${snapshot.paymentType.toUpperCase()}
+            </div>
+            
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Qty</th>
+                  <th>Rate</th>
+                  <th style="text-align: right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${snapshot.totals.itemsForRpc.map((item: any) => {
+                  const prod = snapshot.cart.find((c: any) => c.product.id === item.product_id)?.product;
+                  const isWholesaleRate = snapshot.cart.find((c: any) => c.product.id === item.product_id)?.is_wholesale_rate;
+                  return `
+                    <tr>
+                      <td>
+                        ${prod?.name || 'Item'}
+                        ${isWholesaleRate ? '<span class="wholesale-badge">WS Rate</span>' : ''}
+                      </td>
+                      <td>${item.quantity}</td>
+                      <td>₹${item.unit_price.toFixed(2)}</td>
+                      <td style="text-align: right">₹${(item.unit_price * item.quantity).toFixed(2)}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+            
+            <div style="text-align: right; margin-top: 20px;">
+              <p>Subtotal: ₹${(snapshot.totals.grandTotal - snapshot.totals.taxTotal).toFixed(2)}</p>
+              <p>GST Amount: ₹${snapshot.totals.taxTotal.toFixed(2)}</p>
+              <p class="total-row">Grand Total: ₹${snapshot.totals.grandTotal.toFixed(2)}</p>
+            </div>
+
+            ${isWholesaleCustomer ? `
+              <div style="margin-top: 30px; padding: 15px; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #111827;">Account Ledger Summary</h3>
+                <table style="margin-bottom: 0;">
+                  <tr><td>Previous Balance (Udhaar):</td><td style="text-align: right">₹${previousBalance.toFixed(2)}</td></tr>
+                  <tr><td>Current Invoice Amount:</td><td style="text-align: right">₹${currentBillAmount.toFixed(2)}</td></tr>
+                  <tr class="total-row"><td><strong>Total Payable Balance:</strong></td><td style="text-align: right"><strong>₹${totalOutstanding.toFixed(2)}</strong></td></tr>
+                </table>
+              </div>
+            ` : ''}
+            
+            <div class="footer">
+              <p>Thank you for shopping with us!</p>
+              <p>Generated by Merchant Desk</p>
+            </div>
+          </body>
+        </html>
+      `;
+      
+      const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 }); // A4 dimensions
+      
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+      } else {
+        Alert.alert('Error', 'Sharing is not available on this device');
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Failed to generate bill PDF');
+    }
+  };
+
+  const printThermalReceipt = async (snapshot: any) => {
+    try {
+      const savedSize = await AsyncStorage.getItem('printerPaperSize');
+      const paperSize = (savedSize === '58mm' || savedSize === '80mm') ? savedSize : '80mm';
+      const pxWidth = paperSize === '58mm' ? 210 : 300;
+
+      const isWholesaleCustomer = snapshot.customer?.customer_type === 'wholesale';
+      const previousBalance = snapshot.customer?.balance || 0;
+      const currentBillAmount = snapshot.totals.grandTotal;
+      const totalOutstanding = previousBalance + currentBillAmount;
+
+      const html = `
+        <html lang="en">
+        <head>
+          <style>
+            @page { margin: 0; size: ${paperSize} auto; }
+            body { 
+              font-family: monospace; 
+              margin: 0; 
+              padding: 10px; 
+              width: ${pxWidth}px;
+              color: #000;
+              font-size: 14px;
+              line-height: 1.2;
+            }
+            .center { text-align: center; }
+            .bold { font-weight: bold; }
+            .title { font-size: 20px; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }
+            .divider { border-top: 1px dashed #000; margin: 8px 0; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { text-align: left; padding: 2px 0; vertical-align: top; }
+            th { border-bottom: 1px dashed #000; padding-bottom: 4px; }
+            .right { text-align: right; }
+            .item-name { max-width: 150px; word-wrap: break-word; }
+          </style>
+        </head>
+        <body>
+          <div class="center title">${(businessInfo as any)?.name || 'Retail Store'}</div>
+          <div class="center">${isWholesaleCustomer ? 'WHOLESALE INVOICE' : 'TAX INVOICE'}</div>
+          <div class="divider"></div>
+          <div>
+            Date: ${snapshot.date}<br>
+            Customer: ${snapshot.customer ? snapshot.customer.name : 'Walk-in'}<br>
+            Mode: ${snapshot.paymentType.toUpperCase()}
+          </div>
+          <div class="divider"></div>
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th class="right">Qty</th>
+                <th class="right">Amt</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${snapshot.totals.itemsForRpc.map((item: any) => {
+                const prod = snapshot.cart.find((c: any) => c.product.id === item.product_id)?.product;
+                const isWholesaleRate = snapshot.cart.find((c: any) => c.product.id === item.product_id)?.is_wholesale_rate;
+                return `
+                  <tr>
+                    <td class="item-name">${prod?.name.substring(0,18) || 'Item'}${isWholesaleRate ? '*' : ''}</td>
+                    <td class="right">${item.quantity}</td>
+                    <td class="right">${(item.unit_price * item.quantity).toFixed(2)}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+          <div class="divider"></div>
+          <table>
+            <tr><td>Subtotal</td><td class="right">${(snapshot.totals.grandTotal - snapshot.totals.taxTotal).toFixed(2)}</td></tr>
+            <tr><td>GST</td><td class="right">${snapshot.totals.taxTotal.toFixed(2)}</td></tr>
+            <tr><td class="bold">Grand Total</td><td class="right bold">${snapshot.totals.grandTotal.toFixed(2)}</td></tr>
+          </table>
+          
+          ${isWholesaleCustomer ? `
+            <div class="divider"></div>
+            <div class="center bold">ACCOUNT SUMMARY</div>
+            <table>
+              <tr><td>Prev Udhaar:</td><td class="right">₹${previousBalance.toFixed(2)}</td></tr>
+              <tr><td>This Bill:</td><td class="right">₹${currentBillAmount.toFixed(2)}</td></tr>
+              <tr><td class="bold">Total Due:</td><td class="right bold">₹${totalOutstanding.toFixed(2)}</td></tr>
+            </table>
+          ` : ''}
+
+          <div class="divider"></div>
+          <div class="center">Thank you for shopping!</div>
+          <div class="center" style="font-size:10px; margin-top:8px;">Generated by Merchant Desk</div>
+        </body>
+        </html>
+      `;
+
+      await Print.printAsync({ html });
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Failed to print thermal receipt');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.kicker}>Billing</Text>
-          <Text style={styles.title}>Point of Sale</Text>
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.kicker}>Point of Sale</Text>
+          <Text style={styles.title}>New Bill</Text>
         </View>
+        <TouchableOpacity style={styles.scanBtn} onPress={openScanner}>
+          <Ionicons name="barcode-outline" size={24} color={Colors.accent} />
+          <Text style={styles.scanBtnText}>Scan</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Customer Picker */}
@@ -587,6 +897,40 @@ export default function SalesScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Scanner Modal */}
+      <Modal
+        visible={scannerVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setScannerVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Scan Barcode</Text>
+            <TouchableOpacity onPress={() => setScannerVisible(false)} style={styles.modalClose}>
+              <Ionicons name="close" size={24} color={Colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+          <View style={{ flex: 1, backgroundColor: '#000' }}>
+            {scannerVisible && (
+              <CameraView
+                style={{ flex: 1 }}
+                facing="back"
+                barcodeScannerSettings={{
+                  barcodeTypes: ["qr", "ean13", "ean8", "upc_a", "upc_e", "code128", "code39"]
+                }}
+                onBarcodeScanned={handleBarcodeScanned}
+              >
+                <View style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center' }}>
+                  <View style={{ width: 250, height: 250, borderWidth: 2, borderColor: Colors.accent, backgroundColor: 'transparent' }} />
+                  <Text style={{ color: '#fff', marginTop: 20, fontSize: 16 }}>Align barcode within the square</Text>
+                </View>
+              </CameraView>
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -594,6 +938,7 @@ export default function SalesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
+  headerTitleContainer: { flex: 1 },
   kicker: { fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase', color: Colors.accentInk, marginBottom: 4, fontWeight: '600' },
   title: { fontSize: 28, fontWeight: '700', color: Colors.textPrimary },
   customerSelector: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
@@ -676,5 +1021,20 @@ const styles = StyleSheet.create({
   errorBox: { backgroundColor: 'rgba(201, 162, 39, 0.1)', padding: 12, borderRadius: 8, marginBottom: 16, borderLeftWidth: 3, borderLeftColor: Colors.warn },
   errorText: { color: Colors.textPrimary, fontSize: 13 },
   confirmButton: { backgroundColor: Colors.ok, height: 56, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  confirmButtonText: { color: Colors.bg, fontSize: 18, fontWeight: '700' }
+  confirmButtonText: { color: Colors.bg, fontSize: 18, fontWeight: '700' },
+  scanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border
+  },
+  scanBtnText: {
+    color: Colors.accent,
+    fontWeight: '600',
+  }
 });

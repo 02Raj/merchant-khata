@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -7,6 +7,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { Colors } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
+import * as Haptics from 'expo-haptics';
+import { Skeleton } from '@/components/Skeleton';
 
 type ActivityItem = {
   id: string;
@@ -27,6 +29,13 @@ export default function DashboardScreen() {
   const [receivablesCount, setReceivablesCount] = useState(0);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
+
+  // Expense Modal State
+  const [expenseModalVisible, setExpenseModalVisible] = useState(false);
+  const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseCategory, setExpenseCategory] = useState('Food & Chai');
+  const [expenseMethod, setExpenseMethod] = useState('cash');
+  const [savingExpense, setSavingExpense] = useState(false);
 
   const fetchDashboardData = async () => {
     if (!businessInfo?.id) return;
@@ -164,7 +173,50 @@ export default function DashboardScreen() {
   );
 
   const handleQuickAction = (route: string) => {
-    router.push(route as any);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (route === 'expense') {
+      setExpenseModalVisible(true);
+    } else {
+      router.push(route as any);
+    }
+  };
+
+  const handleAddExpense = async () => {
+    const amount = parseFloat(expenseAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount');
+      return;
+    }
+
+    setSavingExpense(true);
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .insert({
+          business_id: businessInfo!.id,
+          amount,
+          category: expenseCategory,
+          payment_method: expenseMethod,
+          description: ''
+        });
+
+      if (error) {
+        if (error.code === '42P01') {
+          Alert.alert('Database Error', 'Expenses table not found. Please run the SQL migration first!');
+        } else {
+          throw error;
+        }
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setExpenseModalVisible(false);
+        setExpenseAmount('');
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Error', 'Failed to save expense');
+    } finally {
+      setSavingExpense(false);
+    }
   };
 
   const getTimeAgo = (date: Date) => {
@@ -191,121 +243,210 @@ export default function DashboardScreen() {
             <Text style={styles.kicker}>Overview</Text>
             <Text style={styles.title}>Merchant Dashboard</Text>
           </View>
-          <TouchableOpacity onPress={() => signOut()} style={styles.logoutBtn}>
-            <Ionicons name="log-out-outline" size={24} color={Colors.textSecondary} />
+          <TouchableOpacity style={styles.logoutBtn} onPress={() => router.push('/settings')}>
+            <Ionicons name="settings-outline" size={24} color={Colors.textSecondary} />
           </TouchableOpacity>
         </View>
 
-        {/* Summary Cards */}
-        <View style={styles.metricsGrid}>
-          {/* Sales Card */}
-          <View style={[styles.metricCard, styles.metricCardPrimary]}>
-            <View style={styles.metricHeader}>
-              <Ionicons name="trending-up" size={20} color={Colors.textPrimary} />
-              <Text style={styles.metricTitlePrimary}>Today's Sales</Text>
-            </View>
-            <Text style={styles.metricValuePrimary}>₹ {salesToday.toLocaleString('en-IN')}</Text>
-            <Text style={styles.metricSubtitlePrimary}>{salesCount} transactions</Text>
+        {loading && !salesToday ? (
+          <View style={{ gap: 16 }}>
+             <Skeleton style={{ height: 120, borderRadius: 16 }} />
+             <View style={{ flexDirection: 'row', gap: 12 }}>
+                <Skeleton style={{ height: 100, borderRadius: 16, flex: 1 }} />
+                <Skeleton style={{ height: 100, borderRadius: 16, flex: 1 }} />
+             </View>
+             <Skeleton style={{ height: 140, borderRadius: 16, marginTop: 16 }} />
           </View>
-
-          <View style={styles.metricsRow}>
-            {/* Udhaar Card */}
-            <View style={styles.metricCard}>
-              <View style={styles.metricHeader}>
-                <Ionicons name="wallet-outline" size={18} color={Colors.textSecondary} />
-                <Text style={styles.metricTitle}>Receivables</Text>
-              </View>
-              <Text style={styles.metricValue}>₹ {receivables.toLocaleString('en-IN')}</Text>
-              <Text style={styles.metricSubtitle}>{receivablesCount} customers</Text>
-            </View>
-
-            {/* Inventory Card */}
-            <View style={styles.metricCard}>
-              <View style={styles.metricHeader}>
-                <Ionicons name="alert-circle-outline" size={18} color={Colors.warn} />
-                <Text style={styles.metricTitle}>Low Stock</Text>
-              </View>
-              <Text style={styles.metricValue}>{lowStockCount}</Text>
-              <Text style={styles.metricSubtitle}>items need refill</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Quick Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.actionsGrid}>
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={() => handleQuickAction('/(tabs)/sales')}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
-                <Ionicons name="cart" size={24} color={Colors.ok} />
-              </View>
-              <Text style={styles.actionText}>New Sale</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={() => handleQuickAction('/(tabs)/products')}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.actionIconContainer, { backgroundColor: Colors.accentDim }]}>
-                <Ionicons name="add-circle" size={24} color={Colors.accent} />
-              </View>
-              <Text style={styles.actionText}>Add Product</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={() => handleQuickAction('/(tabs)/customers')}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(201, 162, 39, 0.15)' }]}>
-                <Ionicons name="cash" size={24} color={Colors.warn} />
-              </View>
-              <Text style={styles.actionText}>Payment In</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Recent Activity */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Activity</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.activityList}>
-            {recentActivity.length === 0 ? (
-              <View style={{ padding: 20, alignItems: 'center' }}>
-                <Text style={{ color: Colors.textSecondary }}>No recent activity</Text>
-              </View>
-            ) : (
-              recentActivity.map((activity, index) => (
-                <View key={activity.id + index} style={styles.activityItem}>
-                  <View style={styles.activityIcon}>
-                    <Ionicons 
-                      name={activity.type === 'sale' ? "receipt-outline" : "wallet-outline"} 
-                      size={20} 
-                      color={Colors.textSecondary} 
-                    />
-                  </View>
-                  <View style={styles.activityDetails}>
-                    <Text style={styles.activityName}>{activity.title}</Text>
-                    <Text style={styles.activityTime}>{getTimeAgo(activity.time)}</Text>
-                  </View>
-                  <Text style={styles.activityAmount}>+ ₹ {activity.amount.toLocaleString('en-IN')}</Text>
+        ) : (
+          <>
+            {/* Summary Cards */}
+            <View style={styles.metricsGrid}>
+              {/* Sales Card */}
+              <View style={[styles.metricCard, styles.metricCardPrimary]}>
+                <View style={styles.metricHeader}>
+                  <Ionicons name="trending-up" size={20} color={Colors.textPrimary} />
+                  <Text style={styles.metricTitlePrimary}>Today's Sales</Text>
                 </View>
-              ))
-            )}
-          </View>
-        </View>
+                <Text style={styles.metricValuePrimary}>₹ {salesToday.toLocaleString('en-IN')}</Text>
+                <Text style={styles.metricSubtitlePrimary}>{salesCount} transactions</Text>
+              </View>
+
+              <View style={styles.metricsRow}>
+                {/* Udhaar Card */}
+                <View style={styles.metricCard}>
+                  <View style={styles.metricHeader}>
+                    <Ionicons name="wallet-outline" size={18} color={Colors.textSecondary} />
+                    <Text style={styles.metricTitle}>Receivables</Text>
+                  </View>
+                  <Text style={styles.metricValue}>₹ {receivables.toLocaleString('en-IN')}</Text>
+                  <Text style={styles.metricSubtitle}>{receivablesCount} customers</Text>
+                </View>
+
+                {/* Inventory Card */}
+                <View style={styles.metricCard}>
+                  <View style={styles.metricHeader}>
+                    <Ionicons name="alert-circle-outline" size={18} color={Colors.warn} />
+                    <Text style={styles.metricTitle}>Low Stock</Text>
+                  </View>
+                  <Text style={styles.metricValue}>{lowStockCount}</Text>
+                  <Text style={styles.metricSubtitle}>items need refill</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Quick Actions */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Quick Actions</Text>
+              <View style={styles.actionsGrid}>
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={() => handleQuickAction('/(tabs)/sales')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
+                    <Ionicons name="cart" size={24} color={Colors.ok} />
+                  </View>
+                  <Text style={styles.actionText}>New Sale</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={() => handleQuickAction('/(tabs)/products')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.actionIconContainer, { backgroundColor: Colors.accentDim }]}>
+                    <Ionicons name="add-circle" size={24} color={Colors.accent} />
+                  </View>
+                  <Text style={styles.actionText}>Add Product</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={() => handleQuickAction('expense')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                    <Ionicons name="receipt" size={24} color="#EF4444" />
+                  </View>
+                  <Text style={styles.actionText}>Add Expense</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={() => handleQuickAction('/daybook')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                    <Ionicons name="book" size={24} color="#3B82F6" />
+                  </View>
+                  <Text style={styles.actionText}>Day Book</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Recent Activity */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Recent Activity</Text>
+                <TouchableOpacity>
+                  <Text style={styles.seeAllText}>See All</Text>
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.activityList}>
+                {recentActivity.length === 0 ? (
+                  <View style={{ padding: 20, alignItems: 'center' }}>
+                    <Text style={{ color: Colors.textSecondary }}>No recent activity</Text>
+                  </View>
+                ) : (
+                  recentActivity.map((activity, index) => (
+                    <View key={activity.id + index} style={styles.activityItem}>
+                      <View style={styles.activityIcon}>
+                        <Ionicons 
+                          name={activity.type === 'sale' ? "receipt-outline" : "wallet-outline"} 
+                          size={20} 
+                          color={Colors.textSecondary} 
+                        />
+                      </View>
+                      <View style={styles.activityDetails}>
+                        <Text style={styles.activityName}>{activity.title}</Text>
+                        <Text style={styles.activityTime}>{getTimeAgo(activity.time)}</Text>
+                      </View>
+                      <Text style={styles.activityAmount}>+ ₹ {activity.amount.toLocaleString('en-IN')}</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            </View>
+          </>
+        )}
 
       </ScrollView>
+
+      {/* ADD EXPENSE MODAL */}
+      <Modal visible={expenseModalVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeaderFixed}>
+              <Text style={styles.modalTitle}>Record Daily Expense</Text>
+              <TouchableOpacity onPress={() => setExpenseModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Amount (₹)</Text>
+              <TextInput 
+                style={[styles.input, { fontSize: 24, fontWeight: '700' }]} 
+                value={expenseAmount} 
+                onChangeText={setExpenseAmount} 
+                keyboardType="numeric" 
+                placeholder="0.00" 
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Expense Category</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {['Food & Chai', 'Petrol/Travel', 'Salary', 'Cleaning', 'Other'].map(cat => (
+                  <TouchableOpacity 
+                    key={cat}
+                    style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: expenseCategory === cat ? Colors.accent : Colors.border, backgroundColor: expenseCategory === cat ? Colors.accentDim : Colors.surface }}
+                    onPress={() => setExpenseCategory(cat)}
+                  >
+                    <Text style={{ color: expenseCategory === cat ? Colors.accent : Colors.textPrimary }}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Paid Via</Text>
+              <View style={styles.methodToggle}>
+                {['cash', 'upi', 'bank'].map(method => (
+                  <TouchableOpacity 
+                    key={method} 
+                    style={[styles.methodBtn, expenseMethod === method && styles.methodBtnActive]}
+                    onPress={() => setExpenseMethod(method)}
+                  >
+                    <Text style={[styles.methodBtnText, expenseMethod === method && styles.methodBtnTextActive]}>
+                      {method.toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {expenseMethod === 'cash' && (
+                <Text style={{ fontSize: 12, color: Colors.warn, marginTop: 4 }}>* This will deduct from your Day Book Cash Drawer</Text>
+              )}
+            </View>
+            
+            <TouchableOpacity style={styles.submitBtn} onPress={handleAddExpense} disabled={savingExpense}>
+              {savingExpense ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Save Expense</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -490,4 +631,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: Colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
+  modalHeaderFixed: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  modalTitle: { fontSize: 20, fontWeight: '700', color: Colors.textPrimary },
+  formGroup: { marginBottom: 20 },
+  label: { fontSize: 13, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  input: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, paddingHorizontal: 16, height: 52, color: Colors.textPrimary, fontSize: 16 },
+  methodToggle: { flexDirection: 'row', gap: 12 },
+  methodBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
+  methodBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  methodBtnText: { color: Colors.textPrimary, fontWeight: '500' },
+  methodBtnTextActive: { color: Colors.bg, fontWeight: '600' },
+  submitBtn: { backgroundColor: Colors.accent, height: 56, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+  submitBtnText: { color: Colors.bg, fontSize: 16, fontWeight: '600' },
 });

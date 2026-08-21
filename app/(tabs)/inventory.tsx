@@ -11,6 +11,8 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
+import * as Haptics from 'expo-haptics';
+import { Skeleton } from '@/components/Skeleton';
 
 type ProductInventory = {
   id: string;
@@ -109,6 +111,7 @@ export default function InventoryScreen() {
 
       if (error) throw error;
 
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setStockModalVisible(false);
       setAddQty('');
       // Optimistic update
@@ -117,6 +120,7 @@ export default function InventoryScreen() {
       ));
       
     } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Error', 'Failed to add stock');
       console.error(error);
     } finally {
@@ -125,6 +129,7 @@ export default function InventoryScreen() {
   };
 
   const openStockModal = (product: ProductInventory) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedProduct(product);
     setAddQty('');
     setStockModalVisible(true);
@@ -215,8 +220,10 @@ export default function InventoryScreen() {
 
       {/* List */}
       {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={Colors.accent} />
+        <View style={styles.skeletonContainer}>
+          {[1, 2, 3, 4, 5].map(i => (
+            <Skeleton key={i} style={styles.itemSkeleton} />
+          ))}
         </View>
       ) : (
         <FlatList
@@ -356,4 +363,7 @@ const styles = StyleSheet.create({
   
   submitBtn: { backgroundColor: Colors.accent, height: 56, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   submitBtnText: { color: Colors.bg, fontSize: 16, fontWeight: '600' },
+
+  skeletonContainer: { padding: 20, gap: 12 },
+  itemSkeleton: { height: 90, borderRadius: 16 },
 });
