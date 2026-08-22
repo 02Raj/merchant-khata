@@ -25,6 +25,13 @@ type ProductInventory = {
   stockCount: number;
 };
 
+type RawMaterial = {
+  id: string;
+  name: string;
+  stock_quantity: number;
+  unit: string;
+};
+
 export default function InventoryScreen() {
   const { businessInfo } = useAuth();
   
@@ -33,8 +40,11 @@ export default function InventoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Tabs: 'all' | 'low_stock'
-  const [activeTab, setActiveTab] = useState<'all' | 'low_stock'>('all');
+  // Tabs: 'all' | 'low_stock' | 'raw_materials'
+  const [activeTab, setActiveTab] = useState<'all' | 'low_stock' | 'raw_materials'>('all');
+  
+  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
+  const isRestaurant = businessInfo?.business_type === 'restaurant';
 
   // Stock In Modal
   const [stockModalVisible, setStockModalVisible] = useState(false);
@@ -74,6 +84,18 @@ export default function InventoryScreen() {
       });
 
       setProducts(processed);
+
+      if (isRestaurant) {
+        const { data: rmData, error: rmError } = await supabase
+          .from('raw_materials')
+          .select('*')
+          .eq('business_id', businessInfo.id)
+          .order('name');
+        if (!rmError && rmData) {
+          setRawMaterials(rmData);
+        }
+      }
+
     } catch (error) {
       console.error('Error fetching inventory:', error);
     } finally {
@@ -162,6 +184,12 @@ export default function InventoryScreen() {
     return result;
   }, [products, activeTab, searchQuery]);
 
+  const filteredRawMaterials = useMemo(() => {
+    if (!searchQuery.trim()) return rawMaterials;
+    const q = searchQuery.toLowerCase();
+    return rawMaterials.filter(r => r.name.toLowerCase().includes(q));
+  }, [rawMaterials, searchQuery]);
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -199,6 +227,16 @@ export default function InventoryScreen() {
             )}
           </View>
         </TouchableOpacity>
+        {isRestaurant && (
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'raw_materials' && styles.activeTab]}
+            onPress={() => setActiveTab('raw_materials')}
+          >
+            <Text style={[styles.tabText, activeTab === 'raw_materials' && styles.activeTabText]}>
+              Raw Materials
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Search */}
@@ -225,6 +263,31 @@ export default function InventoryScreen() {
             <Skeleton key={i} style={styles.itemSkeleton} />
           ))}
         </View>
+      ) : activeTab === 'raw_materials' ? (
+        <FlatList
+          data={filteredRawMaterials}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchInventory(true)} tintColor={Colors.accent} />}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="cube-outline" size={64} color={Colors.textSecondary} />
+              <Text style={styles.emptyText}>No Raw Materials Found.</Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <View style={styles.itemCard}>
+              <View style={styles.itemInfo}>
+                <Text style={styles.itemName}>{item.name}</Text>
+                <View style={styles.stockRow}>
+                  <Text style={styles.stockValue}>
+                    Stock: {item.stock_quantity} {item.unit}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+        />
       ) : (
         <FlatList
           data={filteredProducts}

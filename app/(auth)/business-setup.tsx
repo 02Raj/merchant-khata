@@ -12,16 +12,43 @@ type BusinessType = 'retail' | 'wholesale' | 'both';
 export default function BusinessSetupScreen() {
   const { refreshMembership } = useAuth();
   
+  const [mode, setMode] = useState<'create' | 'join'>('create');
+  
+  // Create State
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [gstin, setGstin] = useState('');
   const [businessType, setBusinessType] = useState<BusinessType>('retail');
+  
+  // Join State
+  const [joinCode, setJoinCode] = useState('');
   
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const onSubmit = async () => {
     setError(null);
+
+    if (mode === 'join') {
+      if (joinCode.length !== 6) {
+        setError('Please enter a valid 6-digit code.');
+        return;
+      }
+      setLoading(true);
+      try {
+        const { error: joinError } = await supabase.rpc('join_business_as_staff', { p_code: joinCode });
+        if (joinError) throw joinError;
+
+        const hasBusiness = await refreshMembership();
+        if (!hasBusiness) throw new Error('Joined successfully, but failed to load dashboard.');
+      } catch (err: any) {
+        setError(err.message || 'Invalid Invite Code.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (!name.trim() || !address.trim()) {
       setError('Name and address are required.');
       return;
@@ -58,7 +85,7 @@ export default function BusinessSetupScreen() {
     }
   };
 
-  const isFormValid = name.trim().length > 0 && address.trim().length > 0;
+  const isFormValid = mode === 'join' ? joinCode.length === 6 : (name.trim().length > 0 && address.trim().length > 0);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -69,12 +96,48 @@ export default function BusinessSetupScreen() {
         <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <Text style={styles.kicker}>Merchant Desk · Setup</Text>
-            <Text style={styles.title}>Register your Business</Text>
-            <Text style={styles.subtitle}>Enter details to get started with billing and inventory.</Text>
+            <Text style={styles.title}>{mode === 'create' ? 'Register Business' : 'Join as Staff'}</Text>
+            <Text style={styles.subtitle}>
+              {mode === 'create' 
+                ? 'Enter details to get started with billing.' 
+                : 'Enter the 6-digit invite code from the owner.'}
+            </Text>
           </View>
           
+          <View style={styles.tabsContainer}>
+            <TouchableOpacity 
+              style={[styles.tabBtn, mode === 'create' && styles.tabBtnActive]}
+              onPress={() => { setMode('create'); setError(null); }}
+            >
+              <Text style={[styles.tabText, mode === 'create' && styles.tabTextActive]}>Create New</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.tabBtn, mode === 'join' && styles.tabBtnActive]}
+              onPress={() => { setMode('join'); setError(null); }}
+            >
+              <Text style={[styles.tabText, mode === 'join' && styles.tabTextActive]}>Join as Staff</Text>
+            </TouchableOpacity>
+          </View>
+
           <View style={styles.form}>
-            {/* Business Name */}
+            {mode === 'join' ? (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Invite Code *</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={[styles.input, { fontSize: 24, letterSpacing: 4, textAlign: 'center' }]}
+                    value={joinCode}
+                    onChangeText={(t) => setJoinCode(t.replace(/\D/g, '').slice(0,6))}
+                    placeholder="000000"
+                    keyboardType="number-pad"
+                    placeholderTextColor={Colors.textSecondary}
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+            ) : (
+              <>
+                {/* Business Name */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Business Name *</Text>
               <View style={styles.inputContainer}>
@@ -146,6 +209,8 @@ export default function BusinessSetupScreen() {
                 ))}
               </View>
             </View>
+              </>
+            )}
             
             {error ? (
               <View style={styles.errorContainer}>
@@ -162,7 +227,7 @@ export default function BusinessSetupScreen() {
               {loading ? (
                 <ActivityIndicator color={Colors.bg} size="small" />
               ) : (
-                <Text style={styles.buttonText}>Complete Setup</Text>
+                <Text style={styles.buttonText}>{mode === 'create' ? 'Complete Setup' : 'Join Business'}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -198,6 +263,32 @@ const styles = StyleSheet.create({
     color: Colors.accentInk,
     marginBottom: 8,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    marginBottom: 24,
+    backgroundColor: Colors.surface,
+    borderRadius: 8,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  tabBtnActive: {
+    backgroundColor: Colors.accent,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  tabTextActive: {
+    color: Colors.bg,
   },
   title: {
     fontSize: 28,

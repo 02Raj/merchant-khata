@@ -59,6 +59,9 @@ export default function SalesScreen() {
   // Products search state
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Hybrid Pricing State
+  const [pricingMode, setPricingMode] = useState<'retail' | 'wholesale'>('retail');
+  
   // Cart state
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartModalVisible, setCartModalVisible] = useState(false);
@@ -176,6 +179,7 @@ export default function SalesScreen() {
         const newCust = { ...data, balance: 0 };
         setCustomers(prev => [...prev, newCust]);
         setSelectedCustomer(newCust);
+        setPricingMode(newCust.customer_type);
         setAddCustomerModalVisible(false);
         setCustomerModalVisible(false);
         setNewCustomerName('');
@@ -238,7 +242,7 @@ export default function SalesScreen() {
   };
 
   const addToCart = (product: Product) => {
-    const isWholesale = selectedCustomer?.customer_type === 'wholesale' && product.wholesale_price !== null;
+    const isWholesale = pricingMode === 'wholesale' && product.wholesale_price !== null;
     const priceToUse = isWholesale ? product.wholesale_price! : product.sale_price;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -278,11 +282,11 @@ export default function SalesScreen() {
   // Switch cart pricing if customer changes
   useEffect(() => {
     setCart(prev => prev.map(item => {
-      const isWholesale = selectedCustomer?.customer_type === 'wholesale' && item.product.wholesale_price !== null;
+      const isWholesale = pricingMode === 'wholesale' && item.product.wholesale_price !== null;
       const priceToUse = isWholesale ? item.product.wholesale_price! : item.product.sale_price;
       return { ...item, unit_price: priceToUse, is_wholesale_rate: !!isWholesale };
     }));
-  }, [selectedCustomer]);
+  }, [pricingMode]);
 
   const cartTotals = useMemo(() => {
     let subtotal = 0;
@@ -381,6 +385,7 @@ export default function SalesScreen() {
       // Reset
       setCart([]);
       setSelectedCustomer(null);
+      setPricingMode('retail');
       setCheckoutModalVisible(false);
       setCartModalVisible(false);
       setPaymentType('cash');
@@ -617,8 +622,8 @@ export default function SalesScreen() {
       </View>
 
       {/* Customer Picker */}
-      <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
-        <TouchableOpacity style={styles.customerSelector} onPress={() => {
+      <View style={{ paddingHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <TouchableOpacity style={[styles.customerSelector, { flex: 1 }]} onPress={() => {
           setCustomerSearchQuery('');
           setCustomerModalVisible(true);
         }}>
@@ -629,6 +634,23 @@ export default function SalesScreen() {
           </View>
           <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} style={{ marginLeft: 'auto' }} />
         </TouchableOpacity>
+
+        {businessInfo?.business_type === 'both' && (
+          <TouchableOpacity 
+            style={[
+              styles.customerSelector, 
+              { paddingHorizontal: 12, backgroundColor: pricingMode === 'wholesale' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(34, 197, 94, 0.1)' }
+            ]} 
+            onPress={() => setPricingMode(prev => prev === 'retail' ? 'wholesale' : 'retail')}
+          >
+            <View style={{ alignItems: 'center' }}>
+              <Text style={{ fontSize: 10, color: Colors.textSecondary, fontWeight: 'bold', textTransform: 'uppercase' }}>Mode</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: pricingMode === 'wholesale' ? Colors.accent : Colors.ok, marginTop: 2 }}>
+                {pricingMode === 'wholesale' ? 'Wholesale' : 'Retail'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Search Bar */}
@@ -783,7 +805,7 @@ export default function SalesScreen() {
             keyExtractor={c => c.id}
             ListHeaderComponent={
               !customerSearchQuery ? (
-                <TouchableOpacity style={styles.customerRow} onPress={() => { setSelectedCustomer(null); setCustomerModalVisible(false); }}>
+                <TouchableOpacity style={styles.customerRow} onPress={() => { setSelectedCustomer(null); setPricingMode('retail'); setCustomerModalVisible(false); }}>
                   <View style={[styles.customerAvatar, { backgroundColor: Colors.surfaceRaised }]}>
                     <Ionicons name="walk" size={20} color={Colors.textSecondary} />
                   </View>
@@ -795,7 +817,11 @@ export default function SalesScreen() {
               ) : null
             }
             renderItem={({ item }) => (
-              <TouchableOpacity style={styles.customerRow} onPress={() => { setSelectedCustomer(item); setCustomerModalVisible(false); }}>
+              <TouchableOpacity style={styles.customerRow} onPress={() => { 
+                setSelectedCustomer(item); 
+                setPricingMode(item.customer_type);
+                setCustomerModalVisible(false); 
+              }}>
                 <View style={styles.customerAvatar}>
                   <Text style={styles.customerAvatarText}>{item.name.charAt(0).toUpperCase()}</Text>
                 </View>

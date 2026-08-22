@@ -9,17 +9,60 @@ import * as Haptics from 'expo-haptics';
 
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { businessInfo, signOut } = useAuth();
   
   const [paperSize, setPaperSize] = useState<'58mm' | '80mm'>('80mm');
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [generatingCode, setGeneratingCode] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     loadSettings();
-  }, []);
+    if (businessInfo?.id && businessInfo?.role === 'owner') {
+      fetchInviteCode();
+    }
+  }, [businessInfo]);
+
+  const fetchInviteCode = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('invite_code')
+        .eq('id', businessInfo!.id)
+        .single();
+      if (!error && data?.invite_code) {
+        setInviteCode(data.invite_code);
+      }
+    } catch (err) {
+      console.log('Failed to fetch invite code', err);
+    }
+  };
+
+  const generateInviteCode = async () => {
+    setGeneratingCode(true);
+    const code = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digit code
+    try {
+      const { error } = await supabase
+        .from('businesses')
+        .update({ invite_code: code })
+        .eq('id', businessInfo!.id);
+      
+      if (!error) {
+        setInviteCode(code);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert('Error', 'Could not generate code. Try again.');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setGeneratingCode(false);
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -132,6 +175,40 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Staff Management Section */}
+        {businessInfo?.role === 'owner' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Staff Management</Text>
+            <View style={styles.card}>
+              <View style={styles.settingRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.settingLabel}>Waiter Invite Code</Text>
+                  <Text style={styles.settingDesc}>Give this 6-digit code to your waiters. They will enter it when logging in to join your restaurant.</Text>
+                </View>
+              </View>
+              <View style={styles.divider} />
+              
+              {inviteCode ? (
+                <View style={styles.inviteCodeContainer}>
+                  <Text style={styles.inviteCodeText}>{inviteCode}</Text>
+                  <Text style={styles.inviteCodeSub}>Staff Code Active</Text>
+                </View>
+              ) : (
+                <TouchableOpacity 
+                  style={styles.actionBtn} 
+                  onPress={generateInviteCode}
+                  disabled={generatingCode}
+                >
+                  <Ionicons name="key-outline" size={20} color={Colors.accent} />
+                  <Text style={styles.actionBtnText}>
+                    {generatingCode ? 'Generating...' : 'Generate Invite Code'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
         {/* Hardware Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Hardware & Printer</Text>
@@ -208,13 +285,17 @@ const styles = StyleSheet.create({
   toggleBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
   toggleBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   toggleText: { color: Colors.textPrimary, fontWeight: '600' },
-  toggleTextActive: { color: Colors.bg },
+  toggleTextActive: { color: '#fff', fontWeight: '700' },
 
   divider: { height: 1, backgroundColor: Colors.border, marginHorizontal: 16 },
   
   actionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, gap: 8 },
   actionBtnText: { fontSize: 16, fontWeight: '600', color: Colors.accent },
 
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)', gap: 8 },
+  inviteCodeContainer: { padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.bg },
+  inviteCodeText: { fontSize: 32, fontWeight: '800', color: Colors.textPrimary, letterSpacing: 4 },
+  inviteCodeSub: { fontSize: 13, color: Colors.ok, marginTop: 4, fontWeight: '500' },
+
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)', gap: 8 },
   logoutText: { fontSize: 16, fontWeight: '600', color: Colors.warn },
 });

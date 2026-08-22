@@ -355,7 +355,15 @@ export default function ProductsScreen() {
       <TouchableOpacity 
         style={styles.productCard} 
         activeOpacity={0.7}
-        onPress={() => openEditModal(item)}
+        onPress={() => {
+          if (businessInfo?.business_type === 'restaurant') {
+            import('expo-router').then(({ router }) => {
+              router.push(`/products/${item.id}`);
+            });
+          } else {
+            openEditModal(item);
+          }
+        }}
       >
         <View style={styles.productHeader}>
           <Text style={styles.productName}>{item.name}</Text>

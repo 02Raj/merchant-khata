@@ -10,7 +10,8 @@ import { supabase } from '@/lib/supabase';
 
 export type BusinessInfo = {
   id: string;
-  business_type: 'retail' | 'wholesale' | 'both';
+  business_type: 'retail' | 'wholesale' | 'both' | 'restaurant';
+  role: 'owner' | 'staff' | 'waiter';
 };
 
 export async function sendPhoneOtp(phone: string, verifier: ApplicationVerifier) {
@@ -39,6 +40,7 @@ export async function userHasBusiness(userId: string): Promise<BusinessInfo | nu
     .from('business_users')
     .select(`
       business_id,
+      role,
       businesses (
         id,
         business_type
@@ -60,7 +62,8 @@ export async function userHasBusiness(userId: string): Promise<BusinessInfo | nu
 
   return {
     id: business.id,
-    business_type: business.business_type as 'retail' | 'wholesale' | 'both',
+    business_type: business.business_type as 'retail' | 'wholesale' | 'both' | 'restaurant',
+    role: data.role as 'owner' | 'staff' | 'waiter',
   };
 }
 
