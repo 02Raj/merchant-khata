@@ -2,10 +2,11 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Modal, TextInput, Alert, RefreshControl, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
+import { useTables } from '@/hooks/useMoreQueries';
 import * as Haptics from 'expo-haptics';
 
 type Table = {
@@ -25,46 +26,17 @@ export default function TablesScreen() {
   const router = useRouter();
   const { businessInfo } = useAuth();
   
-  const [tables, setTables] = useState<Table[]>([]);
-  const [activeOrders, setActiveOrders] = useState<ActiveOrder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const { data, isLoading: loading, refetch, isRefetching } = useTables(businessInfo?.id);
+  const tables = data?.tables || [];
+  const activeTakeaways = data?.takeaways || [];
 
   // Add table modal
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [newTableName, setNewTableName] = useState('');
   const [savingTable, setSavingTable] = useState(false);
 
-  const fetchTablesAndOrders = async () => {
-    if (!businessInfo?.id) return;
-    try {
-      const [tablesResponse, ordersResponse] = await Promise.all([
-        supabase.from('tables').select('*').eq('business_id', businessInfo.id).eq('is_active', true).order('name'),
-        supabase.from('orders').select('id, table_id, status, total_amount').eq('business_id', businessInfo.id).in('status', ['open', 'billed'])
-      ]);
-
-      if (tablesResponse.error) throw tablesResponse.error;
-      if (ordersResponse.error) throw ordersResponse.error;
-
-      setTables(tablesResponse.data || []);
-      setActiveOrders(ordersResponse.data || []);
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useFocusEffect(
-    useCallback(() => {
-      fetchTablesAndOrders();
-    }, [businessInfo?.id])
-  );
-
   const onRefresh = () => {
-    setRefreshing(true);
-    fetchTablesAndOrders();
+    refetch();
   };
 
   const handleAddTable = async () => {
@@ -82,7 +54,7 @@ export default function TablesScreen() {
       
       setNewTableName('');
       setAddModalVisible(false);
-      fetchTablesAndOrders();
+      refetch();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -91,11 +63,10 @@ export default function TablesScreen() {
     }
   };
 
-  const openTable = (table: Table) => {
+  const openTable = (table: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const activeOrder = activeOrders.find(o => o.table_id === table.id);
-    if (activeOrder) {
-      router.push(`/kot/${activeOrder.id}`);
+    if (table.orderId) {
+      router.push(`/kot/${table.orderId}`);
     } else {
       router.push(`/kot/new?tableId=${table.id}&tableName=${encodeURIComponent(table.name)}`);
     }
@@ -106,16 +77,13 @@ export default function TablesScreen() {
     router.push(`/kot/new?type=takeaway`);
   };
 
-  if (loading && !refreshing) {
+  if (loading && !isRefetching) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={Colors.accent} />
       </View>
     );
   }
-
-  // Filter takeaway orders
-  const activeTakeaways = activeOrders.filter(o => o.table_id === null);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -131,7 +99,7 @@ export default function TablesScreen() {
 
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} tintColor={Colors.accent} />}
       >
         <View style={styles.takeawaySection}>
           <TouchableOpacity style={styles.takeawayButton} onPress={handleTakeaway}>
@@ -160,37 +128,29 @@ export default function TablesScreen() {
         <Text style={styles.sectionTitle}>Dine-in Tables</Text>
         <View style={styles.grid}>
           {tables.map(table => {
-            const order = activeOrders.find(o => o.table_id === table.id);
-            let cardStyle = styles.cardEmpty;
-            let iconColor = Colors.ok;
+            const status = table.orderStatus;
+            const isOccupied = status === 'open' || status === 'billed';
             let statusText = 'Empty';
-
-            if (order) {
-              if (order.status === 'billed') {
-                cardStyle = styles.cardBilled;
-                iconColor = Colors.bg;
-                statusText = 'Billed';
-              } else {
-                cardStyle = styles.cardOpen;
-                iconColor = Colors.bg;
-                statusText = 'Occupied';
-              }
-            }
+            if (status === 'billed') statusText = 'Billed';
+            else if (status === 'open') statusText = 'Occupied';
 
             return (
               <TouchableOpacity 
                 key={table.id} 
-                style={[styles.tableCard, cardStyle]} 
+                style={[
+                  styles.tableCard, 
+                  isOccupied ? (status === 'billed' ? styles.cardBilled : styles.cardOpen) : styles.cardEmpty
+                ]}
                 onPress={() => openTable(table)}
               >
                 <View style={styles.tableHeader}>
-                  <Text style={[styles.tableName, order ? styles.textDark : styles.textLight]}>{table.name}</Text>
-                  <Ionicons name={order ? "restaurant" : "restaurant-outline"} size={20} color={order ? Colors.bg : Colors.textSecondary} />
+                  <Text style={[styles.tableName, isOccupied ? styles.textDark : styles.textLight]}>{table.name}</Text>
+                  <Ionicons name={isOccupied ? "restaurant" : "restaurant-outline"} size={20} color={isOccupied ? Colors.bg : Colors.textSecondary} />
                 </View>
                 <View style={styles.tableFooter}>
-                  <Text style={[styles.tableStatus, order ? styles.textDark : styles.textLight]}>{statusText}</Text>
-                  {order && order.total_amount > 0 && (
-                    <Text style={styles.tableAmount}>₹{Number(order.total_amount).toFixed(2)}</Text>
+                  <Text style={[styles.tableStatus, isOccupied ? styles.textDark : styles.textLight]}>{statusText}</Text>
+                  {isOccupied && (
+                    <Text style={styles.tableAmount}>₹ {table.orderAmount}</Text>
                   )}
                 </View>
               </TouchableOpacity>

@@ -109,7 +109,7 @@ export default function SettingsScreen() {
         </style>
       </head>
       <body>
-        <div class="center title">${(businessInfo as any)?.name || 'MERCHANT KHATA'}</div>
+        <div class="center title">${(businessInfo as any)?.name || 'OMNIBILL'}</div>
         <div class="center">TEST PRINT SUCCESSFUL</div>
         <div class="divider"></div>
         <div>

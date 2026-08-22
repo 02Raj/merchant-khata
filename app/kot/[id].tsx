@@ -397,6 +397,7 @@ export default function KOTScreen() {
   };
 
   const handleReopenBill = async () => {
+    if (!order) return;
     try {
       setProcessingBill(true);
       const { error } = await supabase.from('orders').update({
@@ -426,6 +427,7 @@ export default function KOTScreen() {
   };
 
   const settlePayment = async () => {
+    if (!order) return;
     const cash = Number(cashAmount) || 0;
     const upi = Number(upiAmount) || 0;
     const totalPaid = cash + upi;

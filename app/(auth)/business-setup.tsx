@@ -95,7 +95,7 @@ export default function BusinessSetupScreen() {
       >
         <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
-            <Text style={styles.kicker}>Merchant Desk · Setup</Text>
+            <Text style={styles.kicker}>OmniBill · Setup</Text>
             <Text style={styles.title}>{mode === 'create' ? 'Register Business' : 'Join as Staff'}</Text>
             <Text style={styles.subtitle}>
               {mode === 'create' 

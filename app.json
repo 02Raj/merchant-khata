@@ -1,16 +1,26 @@
 {
   "expo": {
-    "name": "Merchant Desk",
-    "slug": "merchant-desk-app",
+    "name": "OmniBill",
+    "slug": "omnibill-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "merchantdesk",
+    "icon": "./assets/icon.png",
+    "scheme": "omnibill",
     "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1D3D47"
+    },
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#1D3D47"
+      }
     },
     "web": {
       "bundler": "metro",

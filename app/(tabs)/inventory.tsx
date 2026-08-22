@@ -6,11 +6,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 
-import { supabase } from '@/lib/supabase';
-import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
+import { Colors } from '@/lib/theme';
+import { useInventory } from '@/hooks/useQueries';
+import { useAddStock } from '@/hooks/useMutations';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
 
@@ -33,82 +34,25 @@ type RawMaterial = {
 };
 
 export default function InventoryScreen() {
+  const router = useRouter();
   const { businessInfo } = useAuth();
+  const isRestaurant = businessInfo?.business_type === 'restaurant';
   
-  const [products, setProducts] = useState<ProductInventory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const { data: inventoryData, isLoading: loading, refetch, isRefetching } = useInventory(businessInfo?.id, isRestaurant);
+  const products = inventoryData?.products || [];
+  const rawMaterials = inventoryData?.rawMaterials || [];
+
+  const addStockMutation = useAddStock();
+
   const [searchQuery, setSearchQuery] = useState('');
   
   // Tabs: 'all' | 'low_stock' | 'raw_materials'
   const [activeTab, setActiveTab] = useState<'all' | 'low_stock' | 'raw_materials'>('all');
-  
-  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
-  const isRestaurant = businessInfo?.business_type === 'restaurant';
 
   // Stock In Modal
   const [stockModalVisible, setStockModalVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ProductInventory | null>(null);
   const [addQty, setAddQty] = useState('');
-  const [addingStock, setAddingStock] = useState(false);
-
-  const fetchInventory = async (isRefreshing = false) => {
-    if (!businessInfo?.id) return;
-    if (!isRefreshing) setLoading(true);
-    
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .select(`
-          id, name, category, unit, purchase_price, sale_price, low_stock_threshold,
-          inventory_transactions (quantity_change)
-        `)
-        .eq('business_id', businessInfo.id)
-        .eq('is_active', true)
-        .order('name');
-
-      if (error) throw error;
-
-      const processed: ProductInventory[] = (data || []).map((p: any) => {
-        const stock = p.inventory_transactions?.reduce((sum: number, txn: any) => sum + Number(txn.quantity_change), 0) || 0;
-        return {
-          id: p.id,
-          name: p.name,
-          category: p.category,
-          unit: p.unit,
-          purchase_price: Number(p.purchase_price),
-          sale_price: Number(p.sale_price),
-          low_stock_threshold: p.low_stock_threshold ? Number(p.low_stock_threshold) : 5,
-          stockCount: stock
-        };
-      });
-
-      setProducts(processed);
-
-      if (isRestaurant) {
-        const { data: rmData, error: rmError } = await supabase
-          .from('raw_materials')
-          .select('*')
-          .eq('business_id', businessInfo.id)
-          .order('name');
-        if (!rmError && rmData) {
-          setRawMaterials(rmData);
-        }
-      }
-
-    } catch (error) {
-      console.error('Error fetching inventory:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useFocusEffect(
-    useCallback(() => {
-      fetchInventory();
-    }, [businessInfo])
-  );
 
   const handleStockIn = async () => {
     const qty = parseFloat(addQty);
@@ -116,37 +60,22 @@ export default function InventoryScreen() {
       Alert.alert('Error', 'Please enter a valid positive quantity');
       return;
     }
-    if (!selectedProduct) return;
+    if (!selectedProduct || !businessInfo?.id) return;
 
-    setAddingStock(true);
     try {
-      const { error } = await supabase
-        .from('inventory_transactions')
-        .insert({
-          business_id: businessInfo!.id,
-          product_id: selectedProduct.id,
-          quantity_change: qty,
-          reason: 'Quick Restock',
-          source_type: 'adjustment',
-          source_id: selectedProduct.id // Using product ID as dummy source
-        });
-
-      if (error) throw error;
+      await addStockMutation.mutateAsync({
+        businessId: businessInfo.id,
+        productId: selectedProduct.id,
+        quantity: qty
+      });
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setStockModalVisible(false);
       setAddQty('');
-      // Optimistic update
-      setProducts(prev => prev.map(p => 
-        p.id === selectedProduct.id ? { ...p, stockCount: p.stockCount + qty } : p
-      ));
-      
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Error', 'Failed to add stock');
       console.error(error);
-    } finally {
-      setAddingStock(false);
     }
   };
 
@@ -268,7 +197,7 @@ export default function InventoryScreen() {
           data={filteredRawMaterials}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchInventory(true)} tintColor={Colors.accent} />}
+          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.accent} />}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="cube-outline" size={64} color={Colors.textSecondary} />
@@ -293,7 +222,7 @@ export default function InventoryScreen() {
           data={filteredProducts}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchInventory(true)} tintColor={Colors.accent} />}
+          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.accent} />}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="cube-outline" size={64} color={Colors.textSecondary} />
@@ -351,18 +280,39 @@ export default function InventoryScreen() {
             
             <View style={styles.formGroup}>
               <Text style={styles.label}>Quantity to Add ({selectedProduct?.unit})</Text>
-              <TextInput 
-                style={[styles.input, { fontSize: 24, fontWeight: '700' }]} 
-                value={addQty} 
-                onChangeText={setAddQty} 
-                keyboardType="numeric" 
-                placeholder="0" 
-                autoFocus
-              />
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity 
+                  style={styles.stepperBtn} 
+                  onPress={() => {
+                    const current = parseFloat(addQty) || 0;
+                    if (current > 0) setAddQty((current - 1).toString());
+                  }}
+                >
+                  <Ionicons name="remove" size={24} color={Colors.textPrimary} />
+                </TouchableOpacity>
+                
+                <TextInput 
+                  style={[styles.input, { flex: 1, fontSize: 24, fontWeight: '700', textAlign: 'center', marginHorizontal: 12 }]} 
+                  value={addQty} 
+                  onChangeText={setAddQty} 
+                  keyboardType="numeric" 
+                  placeholder="0" 
+                />
+                
+                <TouchableOpacity 
+                  style={styles.stepperBtn} 
+                  onPress={() => {
+                    const current = parseFloat(addQty) || 0;
+                    setAddQty((current + 1).toString());
+                  }}
+                >
+                  <Ionicons name="add" size={24} color={Colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
             </View>
             
-            <TouchableOpacity style={styles.submitBtn} onPress={handleStockIn} disabled={addingStock}>
-              {addingStock ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Add Stock</Text>}
+            <TouchableOpacity style={styles.submitBtn} onPress={handleStockIn} disabled={addStockMutation.isPending}>
+              {addStockMutation.isPending ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Add Stock</Text>}
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -426,6 +376,8 @@ const styles = StyleSheet.create({
   
   submitBtn: { backgroundColor: Colors.accent, height: 56, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   submitBtnText: { color: Colors.bg, fontSize: 16, fontWeight: '600' },
+  
+  stepperBtn: { width: 60, height: 60, backgroundColor: Colors.surface, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: Colors.border },
 
   skeletonContainer: { padding: 20, gap: 12 },
   itemSkeleton: { height: 90, borderRadius: 16 },

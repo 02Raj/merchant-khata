@@ -61,7 +61,7 @@ export default function LoginScreen() {
           ) : null}
 
           <View style={styles.header}>
-            <Text style={styles.kicker}>Merchant Desk · Auth</Text>
+            <Text style={styles.kicker}>OmniBill · Auth</Text>
             <Text style={styles.title}>Login or Signup</Text>
             <Text style={styles.subtitle}>Enter your mobile number to receive an OTP.</Text>
           </View>

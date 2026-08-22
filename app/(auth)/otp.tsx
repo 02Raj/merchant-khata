@@ -111,7 +111,7 @@ export default function OtpScreen() {
           ) : null}
 
           <View style={styles.header}>
-            <Text style={styles.kicker}>Merchant Desk · Auth</Text>
+            <Text style={styles.kicker}>OmniBill · Auth</Text>
             <Text style={styles.title}>Verification</Text>
             <Text style={styles.subtitle}>Enter OTP sent to {formatIndiaDisplay(phone)}</Text>
           </View>

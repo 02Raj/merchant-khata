@@ -2,33 +2,21 @@ import { useState, useCallback } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 import { useAuth } from '@/context/AuthContext';
 import { Colors } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
-
-type ActivityItem = {
-  id: string;
-  type: 'sale' | 'payment';
-  title: string;
-  amount: number;
-  time: Date;
-};
+import { useDashboardMetrics } from '@/hooks/useQueries';
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const { signOut, businessInfo } = useAuth();
+  const { businessInfo } = useAuth();
 
-  const [loading, setLoading] = useState(true);
-  const [salesToday, setSalesToday] = useState(0);
-  const [salesCount, setSalesCount] = useState(0);
-  const [receivables, setReceivables] = useState(0);
-  const [receivablesCount, setReceivablesCount] = useState(0);
-  const [lowStockCount, setLowStockCount] = useState(0);
-  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
+  const { data: metrics, isLoading: loading, refetch } = useDashboardMetrics(businessInfo?.id);
+
 
   // Expense Modal State
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
@@ -37,140 +25,7 @@ export default function DashboardScreen() {
   const [expenseMethod, setExpenseMethod] = useState('cash');
   const [savingExpense, setSavingExpense] = useState(false);
 
-  const fetchDashboardData = async () => {
-    if (!businessInfo?.id) return;
-    setLoading(true);
 
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const startOfTodayIso = today.toISOString();
-
-      // 1. Fetch Today's Sales
-      const { data: salesData, error: salesError } = await supabase
-        .from('sales')
-        .select('total_amount')
-        .eq('business_id', businessInfo.id)
-        .gte('created_at', startOfTodayIso);
-
-      if (!salesError && salesData) {
-        const total = salesData.reduce((sum, sale) => sum + Number(sale.total_amount), 0);
-        setSalesToday(total);
-        setSalesCount(salesData.length);
-      }
-
-      // 2. Fetch Receivables (Net Customer Balance = Debits - Credits)
-      // Getting all ledger transactions for customers under this business
-      const { data: ledgerData, error: ledgerError } = await supabase
-        .from('ledger_transactions')
-        .select('customer_id, amount, transaction_type')
-        .eq('business_id', businessInfo.id)
-        .not('customer_id', 'is', null);
-
-      if (!ledgerError && ledgerData) {
-        // Calculate balance per customer
-        const balances: Record<string, number> = {};
-        ledgerData.forEach(txn => {
-          const cid = txn.customer_id as string;
-          if (!balances[cid]) balances[cid] = 0;
-          if (txn.transaction_type === 'debit') balances[cid] += Number(txn.amount);
-          if (txn.transaction_type === 'credit') balances[cid] -= Number(txn.amount);
-        });
-
-        // Sum up positive balances (what customers owe us)
-        let totalReceivables = 0;
-        let countOwing = 0;
-        Object.values(balances).forEach(bal => {
-          if (bal > 0) {
-            totalReceivables += bal;
-            countOwing++;
-          }
-        });
-        setReceivables(totalReceivables);
-        setReceivablesCount(countOwing);
-      }
-
-      // 3. Fetch Low Stock
-      const { data: productsData, error: productsError } = await supabase
-        .from('products')
-        .select(`
-          id, 
-          low_stock_threshold,
-          inventory_transactions (quantity_change)
-        `)
-        .eq('business_id', businessInfo.id)
-        .eq('is_active', true);
-
-      if (!productsError && productsData) {
-        let lowStock = 0;
-        productsData.forEach((p: any) => {
-          const stock = p.inventory_transactions?.reduce((sum: number, txn: any) => sum + Number(txn.quantity_change), 0) || 0;
-          const threshold = p.low_stock_threshold ? Number(p.low_stock_threshold) : 5;
-          if (stock <= threshold) {
-            lowStock++;
-          }
-        });
-        setLowStockCount(lowStock);
-      }
-
-      // 4. Fetch Recent Activity (Last 5 Sales & Last 5 Payments)
-      const { data: recentSales } = await supabase
-        .from('sales')
-        .select('id, total_amount, created_at, customer_id, customers(name)')
-        .eq('business_id', businessInfo.id)
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      const { data: recentPayments } = await supabase
-        .from('payments')
-        .select('id, amount, created_at, related_type, related_id')
-        .eq('business_id', businessInfo.id)
-        .eq('direction', 'received')
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      const combined: ActivityItem[] = [];
-      
-      if (recentSales) {
-        recentSales.forEach((s: any) => {
-          combined.push({
-            id: s.id,
-            type: 'sale',
-            title: s.customer_id && s.customers?.name ? `Sale to ${s.customers.name}` : `Retail Sale`,
-            amount: Number(s.total_amount),
-            time: new Date(s.created_at)
-          });
-        });
-      }
-
-      if (recentPayments) {
-        recentPayments.forEach((p: any) => {
-          combined.push({
-            id: p.id,
-            type: 'payment',
-            title: 'Payment Received',
-            amount: Number(p.amount),
-            time: new Date(p.created_at)
-          });
-        });
-      }
-
-      // Sort combined by time descending and take top 5
-      combined.sort((a, b) => b.time.getTime() - a.time.getTime());
-      setRecentActivity(combined.slice(0, 5));
-
-    } catch (err) {
-      console.error('Error fetching dashboard data:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useFocusEffect(
-    useCallback(() => {
-      fetchDashboardData();
-    }, [businessInfo])
-  );
 
   const handleQuickAction = (route: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -210,6 +65,7 @@ export default function DashboardScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setExpenseModalVisible(false);
         setExpenseAmount('');
+        refetch();
       }
     } catch (err) {
       console.error(err);
@@ -219,8 +75,8 @@ export default function DashboardScreen() {
     }
   };
 
-  const getTimeAgo = (date: Date) => {
-    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+  const getTimeAgo = (date: Date | string) => {
+    const seconds = Math.floor((new Date().getTime() - new Date(date).getTime()) / 1000);
     if (seconds < 60) return `${seconds} sec ago`;
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes} min ago`;
@@ -234,21 +90,21 @@ export default function DashboardScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchDashboardData} tintColor={Colors.accent} />}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} tintColor={Colors.accent} />}
       >
         
         {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.kicker}>Overview</Text>
-            <Text style={styles.title}>Merchant Dashboard</Text>
+            <Text style={styles.title}>OmniBill Dashboard</Text>
           </View>
           <TouchableOpacity style={styles.logoutBtn} onPress={() => router.push('/settings')}>
             <Ionicons name="settings-outline" size={24} color={Colors.textSecondary} />
           </TouchableOpacity>
         </View>
 
-        {loading && !salesToday ? (
+        {loading && !metrics ? (
           <View style={{ gap: 16 }}>
              <Skeleton style={{ height: 120, borderRadius: 16 }} />
              <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -267,8 +123,8 @@ export default function DashboardScreen() {
                   <Ionicons name="trending-up" size={20} color={Colors.textPrimary} />
                   <Text style={styles.metricTitlePrimary}>Today's Sales</Text>
                 </View>
-                <Text style={styles.metricValuePrimary}>₹ {salesToday.toLocaleString('en-IN')}</Text>
-                <Text style={styles.metricSubtitlePrimary}>{salesCount} transactions</Text>
+                <Text style={styles.metricValuePrimary}>₹ { (metrics?.salesToday || 0).toLocaleString('en-IN')}</Text>
+                <Text style={styles.metricSubtitlePrimary}>{metrics?.salesCount || 0} transactions</Text>
               </View>
 
               <View style={styles.metricsRow}>
@@ -278,8 +134,8 @@ export default function DashboardScreen() {
                     <Ionicons name="wallet-outline" size={18} color={Colors.textSecondary} />
                     <Text style={styles.metricTitle}>Receivables</Text>
                   </View>
-                  <Text style={styles.metricValue}>₹ {receivables.toLocaleString('en-IN')}</Text>
-                  <Text style={styles.metricSubtitle}>{receivablesCount} customers</Text>
+                  <Text style={styles.metricValue}>₹ {(metrics?.receivables || 0).toLocaleString('en-IN')}</Text>
+                  <Text style={styles.metricSubtitle}>{metrics?.receivablesCount || 0} customers</Text>
                 </View>
 
                 {/* Inventory Card */}
@@ -288,7 +144,7 @@ export default function DashboardScreen() {
                     <Ionicons name="alert-circle-outline" size={18} color={Colors.warn} />
                     <Text style={styles.metricTitle}>Low Stock</Text>
                   </View>
-                  <Text style={styles.metricValue}>{lowStockCount}</Text>
+                  <Text style={styles.metricValue}>{metrics?.lowStockCount || 0}</Text>
                   <Text style={styles.metricSubtitle}>items need refill</Text>
                 </View>
               </View>
@@ -354,12 +210,12 @@ export default function DashboardScreen() {
               </View>
               
               <View style={styles.activityList}>
-                {recentActivity.length === 0 ? (
+                {(!metrics?.recentActivity || metrics.recentActivity.length === 0) ? (
                   <View style={{ padding: 20, alignItems: 'center' }}>
                     <Text style={{ color: Colors.textSecondary }}>No recent activity</Text>
                   </View>
                 ) : (
-                  recentActivity.map((activity, index) => (
+                  metrics.recentActivity.map((activity, index) => (
                     <View key={activity.id + index} style={styles.activityItem}>
                       <View style={styles.activityIcon}>
                         <Ionicons 
