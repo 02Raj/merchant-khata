@@ -1,7 +1,6 @@
 import { Component, createRef } from 'react';
 import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import WebView from 'react-native-webview/lib/WebView';
-import type { WebViewMessageEvent } from 'react-native-webview';
+import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import type { ApplicationVerifier } from 'firebase/auth';
 
 import type { FirebaseWebConfig } from '@/lib/firebaseConfig';
