@@ -14,6 +14,10 @@ import { useInventory } from '@/hooks/useQueries';
 import { useAddStock } from '@/hooks/useMutations';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
+import * as Linking from 'expo-linking';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import { supabase } from '@/lib/supabase';
 
 type ProductInventory = {
   id: string;
@@ -24,6 +28,8 @@ type ProductInventory = {
   sale_price: number;
   low_stock_threshold: number;
   stockCount: number;
+  alternate_unit: string | null;
+  conversion_factor: number | null;
 };
 
 type RawMaterial = {
@@ -31,6 +37,12 @@ type RawMaterial = {
   name: string;
   stock_quantity: number;
   unit: string;
+};
+
+type Supplier = {
+  id: string;
+  name: string;
+  phone: string;
 };
 
 export default function InventoryScreen() {
@@ -53,6 +65,131 @@ export default function InventoryScreen() {
   const [stockModalVisible, setStockModalVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ProductInventory | null>(null);
   const [addQty, setAddQty] = useState('');
+  const [useAlternateUnit, setUseAlternateUnit] = useState(false);
+
+  // Supplier Share Modal
+  const [supplierModalVisible, setSupplierModalVisible] = useState(false);
+  const [itemsToShare, setItemsToShare] = useState<ProductInventory[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [fetchingSuppliers, setFetchingSuppliers] = useState(false);
+
+  const fetchSuppliersForShare = async () => {
+    if (!businessInfo?.id) return;
+    setFetchingSuppliers(true);
+    try {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('id, name, phone')
+        .eq('business_id', businessInfo.id)
+        .order('name');
+      if (error) throw error;
+      setSuppliers(data || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFetchingSuppliers(false);
+    }
+  };
+
+  const openShareModal = (items: ProductInventory[]) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setItemsToShare(items);
+    setSupplierModalVisible(true);
+    fetchSuppliersForShare();
+  };
+
+  const shareViaText = async (supplier: Supplier) => {
+    let message = `Hello ${supplier.name},\n\nPlease supply the following items:\n`;
+    itemsToShare.forEach((item, index) => {
+      message += `${index + 1}. ${item.name} - Qty Required: (Low Stock: ${item.stockCount} ${item.unit})\n`;
+    });
+    message += `\nThank you,\n${businessInfo?.name || 'Your Shop'}`;
+    
+    // In India, numbers typically start with 91, but let's just strip non-digits. 
+    // If supplier.phone doesn't have country code, we can prefix 91 for Indian merchants.
+    let phoneStr = supplier.phone.replace(/\D/g, '');
+    if (phoneStr.length === 10) phoneStr = '91' + phoneStr;
+    
+    const url = `whatsapp://send?phone=${phoneStr}&text=${encodeURIComponent(message)}`;
+    
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Error', 'WhatsApp is not installed on this device.');
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Could not open WhatsApp.');
+    }
+    setSupplierModalVisible(false);
+  };
+
+  const shareViaPdf = async (supplier: Supplier) => {
+    const html = `
+      <html>
+        <head>
+          <style>
+            body { font-family: Helvetica, sans-serif; padding: 40px; color: #1f2937; }
+            .header { text-align: center; margin-bottom: 40px; }
+            h1 { color: #111827; margin-bottom: 5px; }
+            .details { display: flex; justify-content: space-between; margin-bottom: 30px; }
+            .box { padding: 15px; border: 1px solid #e5e7eb; border-radius: 8px; width: 45%; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #e5e7eb; padding: 12px; text-align: left; }
+            th { background-color: #f9fafb; color: #374151; font-weight: 600; }
+            .footer { margin-top: 50px; font-size: 12px; color: #6b7280; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>PURCHASE ORDER</h1>
+            <p style="color: #6b7280;">Date: ${new Date().toLocaleDateString('en-IN')}</p>
+          </div>
+          <div class="details">
+            <div class="box">
+              <strong>From:</strong><br/>
+              ${businessInfo?.name || 'Your Shop'}<br/>
+              Phone: ${businessInfo?.owner_phone || ''}
+            </div>
+            <div class="box">
+              <strong>To (Supplier):</strong><br/>
+              ${supplier.name}<br/>
+              Phone: ${supplier.phone}
+            </div>
+          </div>
+          <table>
+            <tr><th>#</th><th>Item Name</th><th>Category</th><th>Current Stock</th><th>Order Qty</th></tr>
+            ${itemsToShare.map((item, index) => `
+              <tr>
+                <td>${index + 1}</td>
+                <td><strong>${item.name}</strong></td>
+                <td>${item.category}</td>
+                <td>${item.stockCount} ${item.unit}</td>
+                <td></td>
+              </tr>
+            `).join('')}
+          </table>
+          <div class="footer">
+            <p>Generated via Merchant Desk App</p>
+          </div>
+        </body>
+      </html>
+    `;
+    
+    try {
+      const { uri } = await Print.printToFileAsync({ html });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: 'Share Purchase Order' });
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Failed to generate or share PDF.');
+    }
+    setSupplierModalVisible(false);
+  };
 
   const handleStockIn = async () => {
     const qty = parseFloat(addQty);
@@ -62,11 +199,16 @@ export default function InventoryScreen() {
     }
     if (!selectedProduct || !businessInfo?.id) return;
 
+    let finalQty = qty;
+    if (useAlternateUnit && selectedProduct.conversion_factor) {
+      finalQty = qty * selectedProduct.conversion_factor;
+    }
+
     try {
       await addStockMutation.mutateAsync({
         businessId: businessInfo.id,
         productId: selectedProduct.id,
-        quantity: qty
+        quantity: finalQty
       });
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -83,6 +225,7 @@ export default function InventoryScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedProduct(product);
     setAddQty('');
+    setUseAlternateUnit(false);
     setStockModalVisible(true);
   };
 
@@ -249,13 +392,23 @@ export default function InventoryScreen() {
                   </View>
                 </View>
 
-                <TouchableOpacity 
-                  style={styles.addStockBtn}
-                  onPress={() => openStockModal(item)}
-                >
-                  <Ionicons name="add" size={20} color={Colors.accent} />
-                  <Text style={styles.addStockBtnText}>Stock</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {isLow && (
+                    <TouchableOpacity 
+                      style={styles.shareIconBtn}
+                      onPress={() => openShareModal([item])}
+                    >
+                      <Ionicons name="logo-whatsapp" size={20} color={Colors.ok} />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity 
+                    style={styles.addStockBtn}
+                    onPress={() => openStockModal(item)}
+                  >
+                    <Ionicons name="add" size={20} color={Colors.accent} />
+                    <Text style={styles.addStockBtnText}>Stock</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             );
           }}
@@ -278,8 +431,28 @@ export default function InventoryScreen() {
               <Text style={styles.contextCurrent}>Current Stock: {selectedProduct?.stockCount} {selectedProduct?.unit}</Text>
             </View>
             
+            {selectedProduct?.alternate_unit ? (
+              <View style={[styles.formGroup, { marginBottom: 16 }]}>
+                <Text style={styles.label}>Select Unit</Text>
+                <View style={{ flexDirection: 'row', backgroundColor: Colors.surfaceRaised, borderRadius: 8, padding: 4 }}>
+                  <TouchableOpacity 
+                    style={[styles.toggleBtn, !useAlternateUnit && styles.toggleBtnActive]} 
+                    onPress={() => setUseAlternateUnit(false)}
+                  >
+                    <Text style={[styles.toggleBtnText, !useAlternateUnit && styles.toggleBtnTextActive]}>{selectedProduct.unit}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.toggleBtn, useAlternateUnit && styles.toggleBtnActive]} 
+                    onPress={() => setUseAlternateUnit(true)}
+                  >
+                    <Text style={[styles.toggleBtnText, useAlternateUnit && styles.toggleBtnTextActive]}>{selectedProduct.alternate_unit} (x{selectedProduct.conversion_factor})</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
+
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Quantity to Add ({selectedProduct?.unit})</Text>
+              <Text style={styles.label}>Quantity to Add ({useAlternateUnit && selectedProduct?.alternate_unit ? selectedProduct.alternate_unit : selectedProduct?.unit})</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <TouchableOpacity 
                   style={styles.stepperBtn} 
@@ -317,6 +490,80 @@ export default function InventoryScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* SHARE LOW STOCK MODAL */}
+      <Modal visible={supplierModalVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Order via WhatsApp</Text>
+              <TouchableOpacity onPress={() => setSupplierModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={{ color: Colors.textSecondary, marginBottom: 16 }}>
+              Select a supplier to order {itemsToShare.length} item(s).
+            </Text>
+
+            {fetchingSuppliers ? (
+              <ActivityIndicator color={Colors.accent} style={{ marginVertical: 40 }} />
+            ) : suppliers.length === 0 ? (
+              <View style={{ alignItems: 'center', marginVertical: 30 }}>
+                <Ionicons name="bus-outline" size={48} color={Colors.textSecondary} />
+                <Text style={{ color: Colors.textSecondary, marginTop: 12 }}>No suppliers saved.</Text>
+                <Text style={{ color: Colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 8 }}>
+                  Go to the Suppliers tab to add a vendor first.
+                </Text>
+              </View>
+            ) : (
+              <FlatList 
+                data={suppliers}
+                keyExtractor={s => s.id}
+                style={{ maxHeight: 400 }}
+                renderItem={({ item }) => (
+                  <View style={styles.supplierCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.supplierName}>{item.name}</Text>
+                      <Text style={styles.supplierPhone}>{item.phone}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TouchableOpacity 
+                        style={styles.actionBtnText} 
+                        onPress={() => shareViaText(item)}
+                      >
+                        <Ionicons name="chatbubble-ellipses" size={18} color={Colors.bg} />
+                        <Text style={{ color: Colors.bg, fontWeight: '600', fontSize: 12 }}>Text</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={styles.actionBtnPdf} 
+                        onPress={() => shareViaPdf(item)}
+                      >
+                        <Ionicons name="document-text" size={18} color={Colors.accent} />
+                        <Text style={{ color: Colors.accent, fontWeight: '600', fontSize: 12 }}>PDF</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              />
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* FLOATING ACTION BUTTON */}
+      {activeTab === 'low_stock' && lowStockCount > 0 && (
+        <TouchableOpacity 
+          style={styles.fab}
+          onPress={() => {
+            const lowItems = filteredProducts.filter(p => p.stockCount <= p.low_stock_threshold);
+            openShareModal(lowItems);
+          }}
+        >
+          <Ionicons name="logo-whatsapp" size={24} color={Colors.bg} />
+          <Text style={styles.fabText}>Order Low Stock</Text>
+        </TouchableOpacity>
+      )}
 
     </SafeAreaView>
   );
@@ -374,10 +621,26 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   input: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, paddingHorizontal: 16, height: 60, color: Colors.textPrimary, fontSize: 16 },
   
+  toggleBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
+  toggleBtnActive: { backgroundColor: Colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
+  toggleBtnText: { fontSize: 13, fontWeight: '500', color: Colors.textSecondary },
+  toggleBtnTextActive: { color: Colors.textPrimary, fontWeight: '600' },
+  
   submitBtn: { backgroundColor: Colors.accent, height: 56, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   submitBtnText: { color: Colors.bg, fontSize: 16, fontWeight: '600' },
   
   stepperBtn: { width: 60, height: 60, backgroundColor: Colors.surface, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: Colors.border },
+
+  shareIconBtn: { backgroundColor: 'rgba(34, 197, 94, 0.1)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(34, 197, 94, 0.2)' },
+  
+  supplierCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  supplierName: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary, marginBottom: 4 },
+  supplierPhone: { fontSize: 13, color: Colors.textSecondary },
+  actionBtnText: { backgroundColor: Colors.ok, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, gap: 4 },
+  actionBtnPdf: { backgroundColor: Colors.accentDim, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, gap: 4 },
+  
+  fab: { position: 'absolute', bottom: 24, right: 24, backgroundColor: Colors.ok, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 28, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 6 },
+  fabText: { color: Colors.bg, fontWeight: '700', fontSize: 15 },
 
   skeletonContainer: { padding: 20, gap: 12 },
   itemSkeleton: { height: 90, borderRadius: 16 },

@@ -182,8 +182,14 @@ export default function SettingsScreen() {
             <View style={styles.card}>
               <View style={styles.settingRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.settingLabel}>Waiter Invite Code</Text>
-                  <Text style={styles.settingDesc}>Give this 6-digit code to your waiters. They will enter it when logging in to join your restaurant.</Text>
+                  <Text style={styles.settingLabel}>
+                    {businessInfo?.business_type === 'restaurant' ? 'Waiter Invite Code' : 'Staff Invite Code'}
+                  </Text>
+                  <Text style={styles.settingDesc}>
+                    {businessInfo?.business_type === 'restaurant' 
+                      ? 'Give this 6-digit code to your waiters. They will enter it when logging in to join your restaurant.'
+                      : 'Give this 6-digit code to your staff. They will enter it when logging in to join your store.'}
+                  </Text>
                 </View>
               </View>
               <View style={styles.divider} />

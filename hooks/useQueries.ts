@@ -143,7 +143,7 @@ export function useInventory(businessId?: string, isRestaurant: boolean = false)
       const { data: productsData, error: productsError } = await supabase
         .from('products')
         .select(`
-          id, name, category, unit, purchase_price, sale_price, low_stock_threshold,
+          id, name, category, unit, purchase_price, sale_price, low_stock_threshold, alternate_unit, conversion_factor,
           inventory_transactions (quantity_change)
         `)
         .eq('business_id', businessId)
@@ -162,7 +162,9 @@ export function useInventory(businessId?: string, isRestaurant: boolean = false)
           purchase_price: Number(p.purchase_price),
           sale_price: Number(p.sale_price),
           low_stock_threshold: p.low_stock_threshold ? Number(p.low_stock_threshold) : 5,
-          stockCount: stock
+          stockCount: stock,
+          alternate_unit: p.alternate_unit || null,
+          conversion_factor: p.conversion_factor ? Number(p.conversion_factor) : null
         };
       });
 

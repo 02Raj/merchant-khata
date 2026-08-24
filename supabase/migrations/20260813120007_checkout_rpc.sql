@@ -28,6 +28,16 @@ BEGIN
     RAISE EXCEPTION 'Customer must be selected for credit sales';
   END IF;
 
+  -- Validate customer belongs to business
+  IF p_customer_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.customers 
+      WHERE id = p_customer_id AND business_id = p_business_id
+    ) THEN
+      RAISE EXCEPTION 'Customer does not belong to this business';
+    END IF;
+  END IF;
+
   -- 2. Create the Sale record
   INSERT INTO public.sales (
     business_id,
@@ -102,7 +112,7 @@ BEGIN
       p_customer_id,
       NULL,
       p_total_amount,
-      'charge',
+      'debit',
       'sale',
       v_sale_id
     );

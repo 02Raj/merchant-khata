@@ -26,13 +26,16 @@ type Product = {
   stockCount: number;
   gst_rate: number;
   tax_inclusive: boolean;
+  alternate_unit: string | null;
+  conversion_factor: number | null;
 };
 
 type CartItem = {
   product: Product;
-  quantity: number;
+  quantity: number | string;
   unit_price: number;
   is_wholesale_rate: boolean;
+  selected_unit: 'base' | 'alternate';
 };
 
 export default function SalesScreen() {
@@ -128,6 +131,7 @@ export default function SalesScreen() {
       .from('products')
       .select(`
         id, name, sale_price, wholesale_price, gst_rate, tax_inclusive, is_active,
+        alternate_unit, conversion_factor,
         inventory_transactions(quantity_change)
       `)
       .eq('business_id', bizId)
@@ -145,6 +149,8 @@ export default function SalesScreen() {
           stockCount: stock,
           gst_rate: Number(p.gst_rate) || 0,
           tax_inclusive: p.tax_inclusive,
+          alternate_unit: p.alternate_unit || null,
+          conversion_factor: p.conversion_factor ? Number(p.conversion_factor) : null,
         };
       });
       setProducts(parsed);
@@ -252,11 +258,11 @@ export default function SalesScreen() {
       if (existing) {
         return prev.map(item => 
           item.product.id === product.id 
-            ? { ...item, quantity: item.quantity + 1 }
+            ? { ...item, quantity: Number(item.quantity) + 1 }
             : item
         );
       }
-      return [...prev, { product, quantity: 1, unit_price: priceToUse, is_wholesale_rate: !!isWholesale }];
+      return [...prev, { product, quantity: 1, unit_price: priceToUse, is_wholesale_rate: !!isWholesale, selected_unit: 'base' }];
     });
   };
 
@@ -264,8 +270,18 @@ export default function SalesScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setCart(prev => prev.map(item => {
       if (item.product.id === productId) {
-        const newQ = item.quantity + delta;
+        const newQ = Number(item.quantity) + delta;
         return newQ > 0 ? { ...item, quantity: newQ } : item;
+      }
+      return item;
+    }));
+  };
+
+  const setDirectQuantity = (productId: string, val: string) => {
+    setCart(prev => prev.map(item => {
+      if (item.product.id === productId) {
+        // Allow user to type string, including "."
+        return { ...item, quantity: val };
       }
       return item;
     }));
@@ -293,7 +309,11 @@ export default function SalesScreen() {
     let taxTotal = 0;
 
     const itemsForRpc = cart.map(item => {
-      const { unit_price, quantity, product } = item;
+      const { unit_price, quantity, product, selected_unit } = item;
+      const parsedQty = Number(quantity) || 0;
+      const isAlt = selected_unit === 'alternate' && product.conversion_factor;
+      const effectiveQuantity = isAlt ? parsedQty * product.conversion_factor! : parsedQty;
+      
       let basePrice = 0;
       let taxAmount = 0;
 
@@ -309,19 +329,19 @@ export default function SalesScreen() {
         basePrice = unit_price;
       }
 
-      const itemTotalBase = basePrice * quantity;
-      const itemTotalTax = taxAmount * quantity;
+      const itemTotalBase = basePrice * effectiveQuantity;
+      const itemTotalTax = taxAmount * effectiveQuantity;
 
       subtotal += itemTotalBase;
       taxTotal += itemTotalTax;
 
       return {
         product_id: product.id,
-        quantity,
+        quantity: effectiveQuantity,
         unit_price,
-        subtotal: unit_price * quantity,
+        subtotal: unit_price * effectiveQuantity,
         tax_rate: product.gst_rate,
-        tax_amount: taxAmount * quantity,
+        tax_amount: taxAmount * effectiveQuantity,
         tax_inclusive: product.tax_inclusive
       };
     });
@@ -330,7 +350,11 @@ export default function SalesScreen() {
     let pureTax = 0;
 
     cart.forEach(item => {
-      const lineTotal = item.unit_price * item.quantity;
+      const parsedQty = Number(item.quantity) || 0;
+      const isAlt = item.selected_unit === 'alternate' && item.product.conversion_factor;
+      const effectiveQuantity = isAlt ? parsedQty * item.product.conversion_factor! : parsedQty;
+      const lineTotal = item.unit_price * effectiveQuantity;
+      
       let lineTax = 0;
       if (item.product.gst_rate > 0) {
         if (item.product.tax_inclusive) {
@@ -454,16 +478,21 @@ export default function SalesScreen() {
               </thead>
               <tbody>
                 ${snapshot.totals.itemsForRpc.map((item: any) => {
-                  const prod = snapshot.cart.find((c: any) => c.product.id === item.product_id)?.product;
-                  const isWholesaleRate = snapshot.cart.find((c: any) => c.product.id === item.product_id)?.is_wholesale_rate;
+                  const cartItem = snapshot.cart.find((c: any) => c.product.id === item.product_id);
+                  const prod = cartItem?.product;
+                  const isWholesaleRate = cartItem?.is_wholesale_rate;
+                  const isAlt = cartItem?.selected_unit === 'alternate' && prod?.conversion_factor;
+                  const parsedQty = Number(cartItem?.quantity) || 0;
+                  const displayQty = isAlt ? parsedQty + ' ' + prod.alternate_unit : item.quantity;
+                  const displayRate = isAlt ? item.unit_price * prod.conversion_factor : item.unit_price;
                   return `
                     <tr>
                       <td>
                         ${prod?.name || 'Item'}
                         ${isWholesaleRate ? '<span class="wholesale-badge">WS Rate</span>' : ''}
                       </td>
-                      <td>${item.quantity}</td>
-                      <td>₹${item.unit_price.toFixed(2)}</td>
+                      <td>${displayQty}</td>
+                      <td>₹${displayRate.toFixed(2)}</td>
                       <td style="text-align: right">₹${(item.unit_price * item.quantity).toFixed(2)}</td>
                     </tr>
                   `;
@@ -565,12 +594,17 @@ export default function SalesScreen() {
             </thead>
             <tbody>
               ${snapshot.totals.itemsForRpc.map((item: any) => {
-                const prod = snapshot.cart.find((c: any) => c.product.id === item.product_id)?.product;
-                const isWholesaleRate = snapshot.cart.find((c: any) => c.product.id === item.product_id)?.is_wholesale_rate;
+                const cartItem = snapshot.cart.find((c: any) => c.product.id === item.product_id);
+                const prod = cartItem?.product;
+                const isWholesaleRate = cartItem?.is_wholesale_rate;
+                const isAlt = cartItem?.selected_unit === 'alternate' && prod?.conversion_factor;
+                const parsedQty = Number(cartItem?.quantity) || 0;
+                const displayQty = isAlt ? parsedQty + ' ' + prod.alternate_unit : item.quantity;
+                
                 return `
                   <tr>
                     <td class="item-name">${prod?.name.substring(0,18) || 'Item'}${isWholesaleRate ? '*' : ''}</td>
-                    <td class="right">${item.quantity}</td>
+                    <td class="right">${displayQty}</td>
                     <td class="right">${(item.unit_price * item.quantity).toFixed(2)}</td>
                   </tr>
                 `;
@@ -730,8 +764,27 @@ export default function SalesScreen() {
               <View style={styles.cartItem}>
                 <View style={styles.cartItemMain}>
                   <Text style={styles.cartItemName}>{item.product.name}</Text>
+                  
+                  {item.product.alternate_unit ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 4 }}>
+                      <TouchableOpacity 
+                        style={[styles.unitToggleBtn, item.selected_unit === 'base' && styles.unitToggleBtnActive]}
+                        onPress={() => setCart(prev => prev.map(c => c.product.id === item.product.id ? { ...c, selected_unit: 'base' } : c))}
+                      >
+                        <Text style={[styles.unitToggleText, item.selected_unit === 'base' && styles.unitToggleTextActive]}>Piece</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.unitToggleBtn, item.selected_unit === 'alternate' && styles.unitToggleBtnActive]}
+                        onPress={() => setCart(prev => prev.map(c => c.product.id === item.product.id ? { ...c, selected_unit: 'alternate' } : c))}
+                      >
+                        <Text style={[styles.unitToggleText, item.selected_unit === 'alternate' && styles.unitToggleTextActive]}>{item.product.alternate_unit}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+
                   <Text style={styles.cartItemPrice}>
-                    ₹{item.unit_price.toFixed(2)} {businessInfo?.business_type === 'both' && item.is_wholesale_rate && <Text style={styles.wholesaleBadge}>(Wholesale)</Text>}
+                    ₹{(item.selected_unit === 'alternate' && item.product.conversion_factor ? item.unit_price * item.product.conversion_factor : item.unit_price).toFixed(2)} 
+                    {businessInfo?.business_type === 'both' && item.is_wholesale_rate && <Text style={styles.wholesaleBadge}> (Wholesale)</Text>}
                   </Text>
                   {item.product.gst_rate > 0 && (
                     <Text style={styles.cartItemTax}>
@@ -743,7 +796,13 @@ export default function SalesScreen() {
                   <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(item.product.id, -1)}>
                     <Ionicons name="remove" size={20} color={Colors.textPrimary} />
                   </TouchableOpacity>
-                  <Text style={styles.qtyText}>{item.quantity}</Text>
+                  <TextInput 
+                    style={styles.qtyInput}
+                    value={item.quantity.toString()}
+                    onChangeText={(val) => setDirectQuantity(item.product.id, val)}
+                    keyboardType="decimal-pad"
+                    selectTextOnFocus={true}
+                  />
                   <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(item.product.id, 1)}>
                     <Ionicons name="add" size={20} color={Colors.textPrimary} />
                   </TouchableOpacity>
@@ -997,9 +1056,14 @@ const styles = StyleSheet.create({
   cartItemPrice: { fontSize: 14, color: Colors.textPrimary, fontWeight: '500' },
   wholesaleBadge: { color: Colors.accent, fontSize: 11 },
   cartItemTax: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  unitToggleBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: Colors.border, marginRight: 8, backgroundColor: Colors.surface },
+  unitToggleBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  unitToggleText: { fontSize: 11, color: Colors.textSecondary, fontWeight: '500' },
+  unitToggleTextActive: { color: Colors.bg, fontWeight: '600' },
   qtyControl: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.bg, borderRadius: 8, borderWidth: 1, borderColor: Colors.border, marginHorizontal: 12 },
   qtyBtn: { padding: 8 },
   qtyText: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary, width: 24, textAlign: 'center' },
+  qtyInput: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary, minWidth: 40, textAlign: 'center', padding: 0, margin: 0 },
   deleteBtn: { padding: 8 },
   
   checkoutFooter: { backgroundColor: Colors.surface, padding: 20, borderTopWidth: 1, borderTopColor: Colors.border, paddingBottom: Platform.OS === 'ios' ? 32 : 20 },

@@ -32,6 +32,8 @@ type Product = {
   gst_rate: number;
   tax_inclusive: boolean;
   barcode: string | null;
+  alternate_unit: string | null;
+  conversion_factor: number | null;
 };
 
 const PREDEFINED_CATEGORIES = ['Groceries', 'Electronics', 'Clothing', 'Hardware', 'Dairy', 'Spices', 'Snacks', 'Beverages'];
@@ -55,6 +57,7 @@ export default function ProductsScreen() {
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [isGlobalFetching, setIsGlobalFetching] = useState(false);
   
   // Form State
   const [formName, setFormName] = useState('');
@@ -71,6 +74,9 @@ export default function ProductsScreen() {
   const [formGstRate, setFormGstRate] = useState(0);
   const [formTaxInclusive, setFormTaxInclusive] = useState(true);
   const [formBarcode, setFormBarcode] = useState('');
+  const [formEnableAlternateUnit, setFormEnableAlternateUnit] = useState(false);
+  const [formAlternateUnit, setFormAlternateUnit] = useState('box');
+  const [formConversionFactor, setFormConversionFactor] = useState('');
   const [formOpeningStock, setFormOpeningStock] = useState('');
   const [originalStock, setOriginalStock] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
@@ -112,6 +118,8 @@ export default function ProductsScreen() {
           gst_rate: p.gst_rate ? Number(p.gst_rate) : 0,
           tax_inclusive: p.tax_inclusive !== false,
           barcode: p.barcode || null,
+          alternate_unit: p.alternate_unit || null,
+          conversion_factor: p.conversion_factor ? Number(p.conversion_factor) : null,
         };
       });
 
@@ -156,6 +164,9 @@ export default function ProductsScreen() {
     setFormGstRate(0);
     setFormTaxInclusive(true);
     setFormBarcode('');
+    setFormEnableAlternateUnit(false);
+    setFormAlternateUnit('box');
+    setFormConversionFactor('');
     setFormOpeningStock('');
     setFormError(null);
     setShowAdvancedOptions(false);
@@ -178,6 +189,9 @@ export default function ProductsScreen() {
     setFormGstRate(product.gst_rate);
     setFormTaxInclusive(product.tax_inclusive);
     setFormBarcode(product.barcode || '');
+    setFormEnableAlternateUnit(!!product.alternate_unit);
+    setFormAlternateUnit(product.alternate_unit || 'box');
+    setFormConversionFactor(product.conversion_factor ? product.conversion_factor.toString() : '');
     setFormOpeningStock(product.stockCount.toString());
     setOriginalStock(product.stockCount);
     setFormError(null);
@@ -187,7 +201,8 @@ export default function ProductsScreen() {
       product.gst_rate > 0 || 
       product.hsn_code || 
       product.wholesale_price || 
-      product.low_stock_threshold !== 5
+      product.low_stock_threshold !== 5 ||
+      product.alternate_unit
     );
     setShowAdvancedOptions(hasAdvancedData);
     
@@ -208,6 +223,67 @@ export default function ProductsScreen() {
       }
     }
     setScannerVisible(true);
+  };
+
+  const handleBarcodeScanned = async (data: string) => {
+    setScannerVisible(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
+    // If scanner was opened from main screen (not inside modal), open the modal now
+    if (!modalVisible) {
+      openAddModal();
+    }
+    
+    setFormBarcode(data);
+    setShowAdvancedOptions(true);
+    
+    // Only attempt auto-fill if we are creating a new product or name is empty
+    if (editingId || formName.trim().length > 0) return;
+
+    setIsGlobalFetching(true);
+    try {
+      const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
+      const result = await response.json();
+      if (result.status === 1 && result.product) {
+        if (result.product.product_name) setFormName(result.product.product_name);
+        
+        if (result.product.categories) {
+          const cats = result.product.categories.split(',');
+          if (cats.length > 0) {
+            const cat = cats[0].trim();
+            // Basic matching with predefined
+            const matched = PREDEFINED_CATEGORIES.find(c => c.toLowerCase() === cat.toLowerCase());
+            if (matched) {
+              setFormCategory(matched);
+              setFormIsCustomCategory(false);
+            } else {
+              setFormCategory(cat);
+              setFormIsCustomCategory(true);
+            }
+          }
+        }
+        
+        if (result.product.quantity) {
+          const qty = result.product.quantity.toLowerCase();
+          if (qty.includes('kg') || qty.includes('g') || qty.includes('ml') || qty.includes('l')) {
+            setFormUnitCategory('measurement');
+            if (qty.includes('kg')) setFormUnit('kg');
+            else if (qty.includes('ml')) setFormUnit('ml');
+            else if (qty.includes('l')) setFormUnit('ltr');
+            else setFormUnit('g');
+          } else {
+            setFormUnitCategory('quantity');
+            setFormUnit('pack');
+          }
+        }
+        
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (err) {
+      console.error("Barcode fetch error", err);
+    } finally {
+      setIsGlobalFetching(false);
+    }
   };
 
   const onSubmitForm = async () => {
@@ -264,6 +340,22 @@ export default function ProductsScreen() {
       }
     }
 
+    let altUnit: string | null = null;
+    let convFactor: number | null = null;
+
+    if (formEnableAlternateUnit) {
+      if (!formAlternateUnit.trim()) {
+        setFormError('Please enter an Alternate Unit name (e.g. Box).');
+        return;
+      }
+      convFactor = parseFloat(formConversionFactor);
+      if (isNaN(convFactor) || convFactor <= 1) {
+        setFormError('Conversion Factor must be a number greater than 1.');
+        return;
+      }
+      altUnit = formAlternateUnit.trim();
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -279,6 +371,8 @@ export default function ProductsScreen() {
         gst_rate: formGstRate,
         tax_inclusive: formTaxInclusive,
         barcode: formBarcode.trim() || null,
+        alternate_unit: altUnit,
+        conversion_factor: convFactor,
         is_active: true,
       };
 
@@ -402,10 +496,16 @@ export default function ProductsScreen() {
           <Text style={styles.kicker}>Inventory</Text>
           <Text style={styles.title}>Products</Text>
         </View>
-        <TouchableOpacity style={styles.addButton} onPress={openAddModal} disabled={!businessInfo}>
-          <Ionicons name="add" size={24} color={Colors.bg} />
-          <Text style={styles.addButtonText}>Add</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity style={styles.scanAddButton} onPress={openScanner} disabled={!businessInfo}>
+            <Ionicons name="barcode-outline" size={20} color={Colors.bg} />
+            <Text style={styles.addButtonText}>Scan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={openAddModal} disabled={!businessInfo}>
+            <Ionicons name="add" size={24} color={Colors.bg} />
+            <Text style={styles.addButtonText}>Add</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -470,7 +570,10 @@ export default function ProductsScreen() {
               <TouchableOpacity onPress={closeForm} style={styles.modalClose}>
                 <Ionicons name="close" size={24} color={Colors.textPrimary} />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>{editingId ? 'Edit Product' : 'Add Product'}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.modalTitle}>{editingId ? 'Edit Product' : 'Add Product'}</Text>
+                {isGlobalFetching && <ActivityIndicator size="small" color={Colors.accent} />}
+              </View>
               <View style={{ width: 40 }} />
             </View>
 
@@ -560,6 +663,31 @@ export default function ProductsScreen() {
               {/* --- ADVANCED DETAILS --- */}
               {showAdvancedOptions && (
                 <View style={styles.advancedSection}>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.sectionDivider}>Bulk Packing (Alternate Unit)</Text>
+                    <View style={styles.unitTypeToggle}>
+                      <TouchableOpacity style={[styles.toggleBtn, formEnableAlternateUnit && styles.toggleBtnActive]} onPress={() => setFormEnableAlternateUnit(true)}>
+                        <Text style={[styles.toggleBtnText, formEnableAlternateUnit && styles.toggleBtnTextActive]}>Enabled</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.toggleBtn, !formEnableAlternateUnit && styles.toggleBtnActive]} onPress={() => setFormEnableAlternateUnit(false)}>
+                        <Text style={[styles.toggleBtnText, !formEnableAlternateUnit && styles.toggleBtnTextActive]}>Disabled</Text>
+                      </TouchableOpacity>
+                    </View>
+                    
+                    {formEnableAlternateUnit && (
+                      <View style={[styles.row, { marginTop: 8, marginBottom: 8 }]}>
+                        <View style={[styles.formGroup, { flex: 1 }]}>
+                          <Text style={styles.label}>Alternate Unit</Text>
+                          <TextInput style={styles.input} value={formAlternateUnit} onChangeText={setFormAlternateUnit} placeholder="e.g. Box, Carton" placeholderTextColor={Colors.textSecondary} />
+                        </View>
+                        <View style={[styles.formGroup, { flex: 1 }]}>
+                          <Text style={styles.label}>1 {formAlternateUnit || 'Box'} = ? {formUnit}</Text>
+                          <TextInput style={styles.input} value={formConversionFactor} onChangeText={setFormConversionFactor} keyboardType="numeric" placeholder="e.g. 10" placeholderTextColor={Colors.textSecondary} />
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
                   <View style={styles.formGroup}>
                     <Text style={styles.label}>Barcode / SKU (Optional)</Text>
                     <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -673,11 +801,7 @@ export default function ProductsScreen() {
                 barcodeScannerSettings={{
                   barcodeTypes: ["qr", "ean13", "ean8", "upc_a", "upc_e", "code128", "code39"]
                 }}
-                onBarcodeScanned={({ data }) => {
-                  setFormBarcode(data);
-                  setScannerVisible(false);
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                }}
+                onBarcodeScanned={({ data }) => handleBarcodeScanned(data)}
               >
                 <View style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center' }}>
                   <View style={{ width: 250, height: 250, borderWidth: 2, borderColor: Colors.accent, backgroundColor: 'transparent' }} />
@@ -698,6 +822,7 @@ const styles = StyleSheet.create({
   kicker: { fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase', color: Colors.accentInk, marginBottom: 4, fontWeight: '600' },
   title: { fontSize: 28, fontWeight: '700', color: Colors.textPrimary },
   addButton: { flexDirection: 'row', backgroundColor: Colors.accent, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, alignItems: 'center', gap: 6 },
+  scanAddButton: { flexDirection: 'row', backgroundColor: Colors.ok, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, alignItems: 'center', gap: 6 },
   addButtonText: { color: Colors.bg, fontWeight: '700', fontSize: 14 },
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface, marginHorizontal: 20, marginBottom: 16, borderRadius: 12, paddingHorizontal: 12, height: 48, borderWidth: 1, borderColor: Colors.border },
   searchIcon: { marginRight: 8 },
