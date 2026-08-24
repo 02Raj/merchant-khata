@@ -13,7 +13,7 @@ module.exports = {
         appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID ?? '',
       },
       eas: {
-        projectId: 'd8ea351a-1572-460e-bf3f-108800e3d791',
+        projectId: '455dec2c-e0a2-433c-955b-e07b91e16b20',
       },
     },
   },
