@@ -8,22 +8,10 @@ function requirePublicEnv(
 ): string {
   const value =
     (name === 'EXPO_PUBLIC_SUPABASE_URL'
-      ? process.env.EXPO_PUBLIC_SUPABASE_URL
-      : process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY)?.trim();
+      ? process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://wryyfshcwrrenwrhlakj.supabase.co'
+      : process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_x-000hfvC_XczyqG0iv9Og_T6oJpV-k')?.trim();
 
-  if (!value) {
-    throw new Error(
-      `Missing ${name}. Add it to .env in the project root (anon/public key only — never service_role) and restart Expo.`,
-    );
-  }
-
-  if (value.includes('YOUR_PROJECT_ID') || value.includes('YOUR_ANON_PUBLIC_KEY')) {
-    throw new Error(
-      `${name} is still a placeholder. Replace it in .env with your Supabase project value and restart Expo.`,
-    );
-  }
-
-  return value;
+  return value || '';
 }
 
 const isWebServer = Platform.OS === 'web' && typeof window === 'undefined';
