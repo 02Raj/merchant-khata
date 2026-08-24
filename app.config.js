@@ -12,6 +12,9 @@ module.exports = {
         messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? '',
         appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID ?? '',
       },
+      eas: {
+        projectId: 'd8ea351a-1572-460e-bf3f-108800e3d791',
+      },
     },
   },
 };
