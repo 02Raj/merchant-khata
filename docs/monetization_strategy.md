@@ -15,3 +15,7 @@ B2B (Billing) apps me ads dikhana sabse badi galti hoti hai. Counter par custome
 - Tab aap "Subscription Model (SaaS)" launch karna (Basic vs Premium). 
 - **Free plan (Basic):** User ko limit kardo (jaise max 500 bills/month aur no AI features).
 - **Premium plan:** (₹399/month ya ₹3,999/saal) walo ko Unlimited Bills aur 300 AI Credits free do!
+
+### Version Control & Branching Strategy
+- **`phase-1` Branch:** Is branch mein hum Phase 1 ka naya kaam (AI Credits, Pay-as-you-go, aur Razorpay) implement karenge.
+- **`main` Branch:** Ye branch hum testing aur bug fixes ke liye use karenge. Aage chalkar jab Phase 2 banayenge, toh uski updates bhi isme test hoti rahengi.
