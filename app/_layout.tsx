@@ -4,7 +4,7 @@ import { LogBox, Text, View } from 'react-native';
 LogBox.ignoreLogs([
   'Failed to initialize reCAPTCHA Enterprise config',
 ]);
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -25,9 +25,10 @@ function RootNavigator() {
   const { isReady, session, hasBusiness } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const rootNavigationState = useRootNavigationState();
 
   useEffect(() => {
-    if (!isReady) return;
+    if (!isReady || !rootNavigationState?.key) return;
 
     const group = segments[0];
     const screen = segments[1];

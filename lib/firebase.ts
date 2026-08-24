@@ -10,24 +10,32 @@ let auth: Auth | null = null;
 export function getFirebaseAuth(): Auth {
   if (auth) return auth;
 
-  const config = getFirebaseWebConfig();
-  const app = getApps().length > 0 ? getApp() : initializeApp(config);
-
-  if (Platform.OS === 'web') {
-    auth = getAuth(app);
-    return auth;
-  }
-
   try {
-    const rnAuth = require('@firebase/auth') as {
-      getReactNativePersistence: (storage: typeof AsyncStorage) => Persistence;
-    };
-    auth = initializeAuth(app, {
-      persistence: rnAuth.getReactNativePersistence(AsyncStorage),
-    });
-  } catch {
-    auth = getAuth(app);
+    const config = getFirebaseWebConfig();
+    const app = getApps().length > 0 ? getApp() : initializeApp(config);
+
+    if (Platform.OS === 'web') {
+      auth = getAuth(app);
+      return auth;
+    }
+
+    try {
+      const rnAuth = require('@firebase/auth') as any;
+      if (rnAuth && typeof rnAuth.getReactNativePersistence === 'function') {
+        auth = initializeAuth(app, {
+          persistence: rnAuth.getReactNativePersistence(AsyncStorage),
+        });
+      } else {
+        auth = getAuth(app);
+      }
+    } catch {
+      auth = getAuth(app);
+    }
+  } catch (e) {
+    console.error("Firebase Init Error:", e);
+    // Return dummy to prevent crash
+    auth = {} as Auth; 
   }
 
-  return auth;
+  return auth || ({} as Auth);
 }
