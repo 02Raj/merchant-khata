@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { getFirebaseAuth } from '@/lib/firebase';
 
-type BusinessType = 'retail' | 'wholesale' | 'both';
+type BusinessType = 'retail' | 'wholesale' | 'both' | 'restaurant';
 
 export default function BusinessSetupScreen() {
   const { refreshMembership } = useAuth();
@@ -187,7 +187,7 @@ export default function BusinessSetupScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Business Type *</Text>
               <View style={styles.typeSelector}>
-                {(['retail', 'wholesale', 'both'] as BusinessType[]).map((type) => (
+                {(['retail', 'wholesale', 'both', 'restaurant'] as BusinessType[]).map((type) => (
                   <TouchableOpacity
                     key={type}
                     style={[

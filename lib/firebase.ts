@@ -32,10 +32,11 @@ export function getFirebaseAuth(): Auth {
       auth = getAuth(app);
     }
   } catch (e) {
-    console.error("Firebase Init Error:", e);
-    // Return dummy to prevent crash
-    auth = {} as Auth; 
+    console.error('Firebase Init Error:', e);
+    const config = getFirebaseWebConfig();
+    const app = getApps().length > 0 ? getApp() : initializeApp(config);
+    auth = getAuth(app);
   }
 
-  return auth || ({} as Auth);
+  return auth;
 }

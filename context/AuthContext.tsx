@@ -29,26 +29,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let alive = true;
+    let unsubscribe = () => {};
 
-    const auth = getFirebaseAuth();
-    
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      let bizInfo: BusinessInfo | null = null;
-      if (user?.uid) {
-        try {
-          bizInfo = await userHasBusiness(user.uid);
-        } catch {
-          bizInfo = null;
+    try {
+      const firebaseAuth = getFirebaseAuth();
+
+      unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+        let bizInfo: BusinessInfo | null = null;
+        if (user?.uid) {
+          try {
+            bizInfo = await userHasBusiness(user.uid);
+          } catch {
+            bizInfo = null;
+          }
         }
-      }
-      if (!alive) return;
-      setAuth({ 
-        isReady: true, 
-        session: user, 
-        hasBusiness: !!bizInfo, 
-        businessInfo: bizInfo 
+        if (!alive) return;
+        setAuth({
+          isReady: true,
+          session: user,
+          hasBusiness: !!bizInfo,
+          businessInfo: bizInfo,
+        });
       });
-    });
+    } catch (error) {
+      console.error('Firebase auth setup failed:', error);
+      if (alive) {
+        setAuth({ isReady: true, session: null, hasBusiness: false, businessInfo: null });
+      }
+    }
 
     return () => {
       alive = false;
