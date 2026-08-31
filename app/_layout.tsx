@@ -18,7 +18,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 5, // 5 minutes cache
+      staleTime: 1000 * 60 * 5,
       retry: 2,
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
@@ -27,7 +27,7 @@ const queryClient = new QueryClient({
 });
 
 function RootNavigator() {
-  const { isReady, session, hasBusiness, isPlatformAdmin } = useAuth();
+  const { isReady, session, hasBusiness } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
@@ -35,22 +35,13 @@ function RootNavigator() {
   useEffect(() => {
     if (!isReady || !rootNavigationState?.key) return;
 
-    const group = segments[0] as string | undefined;
-    const screen = segments[1] as string | undefined;
+    const group = segments[0];
+    const screen = segments[1];
 
     if (!session) {
-      const onAuthScreen =
-        group === '(auth)' &&
-        (screen === 'login' || screen === 'otp' || screen === 'owner-login');
-      if (!onAuthScreen) {
+      const onLoginOrOtp = group === '(auth)' && (screen === 'login' || screen === 'otp');
+      if (!onLoginOrOtp) {
         router.replace('/(auth)/login');
-      }
-      return;
-    }
-
-    if (isPlatformAdmin) {
-      if (group !== '(admin)') {
-        router.replace('/(admin)' as never);
       }
       return;
     }
@@ -62,10 +53,10 @@ function RootNavigator() {
       return;
     }
 
-    if (group === '(auth)' || group === '(admin)') {
+    if (group === '(auth)') {
       router.replace('/(tabs)/dashboard');
     }
-  }, [hasBusiness, isPlatformAdmin, isReady, router, segments, session]);
+  }, [hasBusiness, isReady, router, segments, session]);
 
   return (
     <>
@@ -77,7 +68,6 @@ function RootNavigator() {
       ) : null}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(admin)" />
         <Stack.Screen name="(tabs)" />
       </Stack>
     </>
