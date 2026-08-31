@@ -13,6 +13,9 @@ export type BusinessInfo = {
   id: string;
   name: string;
   owner_phone: string;
+  address: string;
+  gstin: string | null;
+  fssai_number: string | null;
   business_type: 'retail' | 'wholesale' | 'both' | 'restaurant';
   role: 'owner' | 'staff' | 'waiter';
 };
@@ -54,6 +57,9 @@ export async function userHasBusiness(userId: string): Promise<BusinessInfo | nu
         id,
         name,
         owner_phone,
+        address,
+        gstin,
+        fssai_number,
         business_type
       )
     `)
@@ -75,6 +81,9 @@ export async function userHasBusiness(userId: string): Promise<BusinessInfo | nu
     id: business.id,
     name: business.name,
     owner_phone: business.owner_phone,
+    address: business.address,
+    gstin: business.gstin ?? null,
+    fssai_number: business.fssai_number ?? null,
     business_type: business.business_type as 'retail' | 'wholesale' | 'both' | 'restaurant',
     role: data.role as 'owner' | 'staff' | 'waiter',
   };

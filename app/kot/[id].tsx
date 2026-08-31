@@ -9,12 +9,15 @@ import { useAuth } from '@/context/AuthContext';
 import * as Haptics from 'expo-haptics';
 import * as Print from 'expo-print';
 import { generateReceiptHTML, generateKOTHTML } from '@/lib/printTemplate';
+import { getPrinterPaperSize } from '@/lib/printerSettings';
 
 // Types
 type Product = {
   id: string;
   name: string;
   sale_price: number;
+  gst_rate: number;
+  tax_inclusive: boolean;
   is_available_today: boolean;
 };
 
@@ -39,6 +42,7 @@ type OrderItem = {
   modifiers: Modifier[];
   qty: number;
   unit_price: number;
+  kot_number?: number | null;
   status: 'pending' | 'sent' | 'cancelled';
   notes: string;
 };
@@ -74,6 +78,10 @@ export default function KOTScreen() {
 
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<Order | null>(null);
+  const [resolvedTableName, setResolvedTableName] = useState<string | undefined>(tableName);
+  
+  const effectiveOrderType = order?.type ?? orderType;
+  const displayTableName = effectiveOrderType === 'takeaway' ? undefined : (resolvedTableName || tableName);
   
   // Menu Data
   const [products, setProducts] = useState<Product[]>([]);
@@ -98,6 +106,18 @@ export default function KOTScreen() {
   const [upiAmount, setUpiAmount] = useState('');
   const [processingBill, setProcessingBill] = useState(false);
 
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelTargetItem, setCancelTargetItem] = useState<OrderItem | null>(null);
+
+  const calcBillableTotal = useCallback(
+    (orderItems: OrderItem[]) =>
+      orderItems
+        .filter((item) => item.status !== 'cancelled')
+        .reduce((sum, item) => sum + item.unit_price * item.qty, 0),
+    [],
+  );
+
   useEffect(() => {
     fetchData();
   }, [orderId]);
@@ -108,12 +128,21 @@ export default function KOTScreen() {
     try {
       // Fetch Menu
       const [pRes, vRes, mRes] = await Promise.all([
-        supabase.from('products').select('id, name, sale_price, is_available_today').eq('business_id', businessInfo.id),
+        supabase.from('products').select('id, name, sale_price, gst_rate, tax_inclusive, is_available_today').eq('business_id', businessInfo.id),
         supabase.from('product_variants').select('*'), // Filtered via RLS
         supabase.from('modifiers').select('*') // Filtered via RLS
       ]);
       
-      if (pRes.data) setProducts(pRes.data);
+      if (pRes.data) {
+        setProducts(
+          pRes.data.map((product) => ({
+            ...product,
+            sale_price: Number(product.sale_price),
+            gst_rate: Number(product.gst_rate) || 0,
+            tax_inclusive: product.tax_inclusive ?? true,
+          })),
+        );
+      }
       if (vRes.data) setVariants(vRes.data);
       if (mRes.data) setModifiers(mRes.data);
 
@@ -123,23 +152,42 @@ export default function KOTScreen() {
         if (oErr) throw oErr;
         setOrder(oData);
 
+        if (oData.table_id) {
+          const { data: tableData } = await supabase
+            .from('tables')
+            .select('name')
+            .eq('id', oData.table_id)
+            .single();
+          if (tableData?.name) {
+            setResolvedTableName(tableData.name);
+          }
+        } else {
+          setResolvedTableName(undefined);
+        }
+
         const { data: iData, error: iErr } = await supabase.from('order_items').select('*').eq('order_id', orderId);
         if (iErr) throw iErr;
         
         // Map DB items to UI items
         if (iData && pRes.data) {
           const mappedItems: OrderItem[] = iData.map(dbItem => {
-            const prod = pRes.data.find(p => p.id === dbItem.product_id)!;
+            const prod = pRes.data!.find(p => p.id === dbItem.product_id)!;
             const variant = vRes.data?.find(v => v.id === dbItem.product_variant_id);
             const itemMods = (dbItem.modifier_ids || []).map((mid: string) => mRes.data?.find(m => m.id === mid)).filter(Boolean) as Modifier[];
             
             return {
               id: dbItem.id,
-              product: prod,
+              product: {
+                ...prod,
+                sale_price: Number(prod.sale_price),
+                gst_rate: Number(prod.gst_rate) || 0,
+                tax_inclusive: prod.tax_inclusive ?? true,
+              },
               variant,
               modifiers: itemMods,
               qty: dbItem.qty,
-              unit_price: dbItem.unit_price,
+              unit_price: Number(dbItem.unit_price),
+              kot_number: dbItem.kot_number,
               status: dbItem.status,
               notes: dbItem.notes || ''
             };
@@ -257,20 +305,41 @@ export default function KOTScreen() {
       const { error: itemsErr } = await supabase.from('order_items').insert(insertData);
       if (itemsErr) throw itemsErr;
 
-      // 3. Update total amount
-      const totalAmount = items.reduce((sum, item) => sum + (item.unit_price * item.qty), 0);
-      await supabase.from('orders').update({ total_amount: totalAmount }).eq('id', currentOrderId);
+      const updatedItems = items.map((item) =>
+        item.status === 'pending'
+          ? { ...item, status: 'sent' as const, kot_number: newKotCount }
+          : item,
+      );
+      const totalAmount = calcBillableTotal(updatedItems);
+      await supabase.from('orders').update({
+        kot_count: newKotCount,
+        total_amount: totalAmount,
+      }).eq('id', currentOrderId);
 
       // Print KOT
       try {
-        const orderDataToPrint = order || { type: orderType, kot_count: newKotCount };
-        const html = generateKOTHTML(orderDataToPrint, pendingItems, tableName);
+        const paperSize = await getPrinterPaperSize();
+        const orderDataToPrint = {
+          type: effectiveOrderType,
+          kot_count: newKotCount,
+        };
+        const html = generateKOTHTML(orderDataToPrint, pendingItems, displayTableName, paperSize);
         await Print.printAsync({ html });
       } catch (printErr) {
         console.error("KOT Print Failed", printErr);
       }
 
-      setItems(items.map(i => i.status === 'pending' ? { ...i, status: 'sent' } : i));
+      setItems(updatedItems);
+      setOrder((prev) => prev
+        ? { ...prev, kot_count: newKotCount, total_amount: totalAmount }
+        : {
+            id: currentOrderId!,
+            table_id: tableId || null,
+            status: 'open',
+            kot_count: newKotCount,
+            type: orderType,
+            total_amount: totalAmount,
+          });
       Alert.alert('Success', `KOT #${newKotCount} Sent to Kitchen!`);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       
@@ -282,43 +351,87 @@ export default function KOTScreen() {
     }
   };
 
+  const openCancelModal = (item: OrderItem) => {
+    setCancelTargetItem(item);
+    setCancelReason('');
+    setCancelModalVisible(true);
+  };
+
+  const submitCancelRequest = async () => {
+    if (!cancelTargetItem?.id) return;
+    if (!cancelReason.trim()) {
+      Alert.alert('Error', 'Reason is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const { data, error } = await supabase.from('cancel_requests').insert({
+        order_item_id: cancelTargetItem.id,
+        reason: cancelReason.trim(),
+        status: 'pending',
+        requested_by: session?.uid,
+      }).select().single();
+      if (error) throw error;
+      setCancelRequests([...cancelRequests, data]);
+      setCancelModalVisible(false);
+      setCancelTargetItem(null);
+      setCancelReason('');
+      Alert.alert('Sent', 'Cancel request sent to owner.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const requestCancelItem = (item: OrderItem) => {
-    Alert.prompt(
-      'Cancel Item',
-      'Reason for cancellation?',
-      [
-        { text: 'Back', style: 'cancel' },
-        { 
-          text: 'Send Request', 
-          onPress: async (reason?: string) => {
-            if (!reason) return Alert.alert('Error', 'Reason is required');
-            try {
-              setLoading(true);
-              const { data, error } = await supabase.from('cancel_requests').insert({
-                order_item_id: item.id!,
-                reason,
-                status: 'pending',
-                requested_by: session?.uid
-              }).select().single();
-              if (error) throw error;
-              setCancelRequests([...cancelRequests, data]);
-              Alert.alert('Sent', 'Cancel request sent to owner.');
-            } catch (e:any) {
-              Alert.alert('Error', e.message);
-            } finally {
-              setLoading(false);
-            }
-          }
-        }
-      ]
-    );
+    if (Platform.OS === 'ios') {
+      Alert.prompt(
+        'Cancel Item',
+        'Reason for cancellation?',
+        [
+          { text: 'Back', style: 'cancel' },
+          {
+            text: 'Send Request',
+            onPress: async (reason?: string) => {
+              if (!reason?.trim()) {
+                Alert.alert('Error', 'Reason is required');
+                return;
+              }
+              try {
+                setLoading(true);
+                const { data, error } = await supabase.from('cancel_requests').insert({
+                  order_item_id: item.id!,
+                  reason: reason.trim(),
+                  status: 'pending',
+                  requested_by: session?.uid,
+                }).select().single();
+                if (error) throw error;
+                setCancelRequests([...cancelRequests, data]);
+                Alert.alert('Sent', 'Cancel request sent to owner.');
+              } catch (e: any) {
+                Alert.alert('Error', e.message);
+              } finally {
+                setLoading(false);
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    openCancelModal(item);
   };
 
   const approveCancel = async (cr: CancelRequest, item: OrderItem) => {
     try {
       setLoading(true);
       
-      // Update item status
+      const updatedItems = items.map((i) => (i.id === item.id ? { ...i, status: 'cancelled' as const } : i));
+      const newTotal = calcBillableTotal(updatedItems);
+
       await supabase.from('order_items').update({ status: 'cancelled' }).eq('id', item.id);
       
       // Update request status
@@ -326,9 +439,14 @@ export default function KOTScreen() {
         status: 'approved', 
         approved_by: session?.uid 
       }).eq('id', cr.id);
+
+      if (order?.id) {
+        await supabase.from('orders').update({ total_amount: newTotal }).eq('id', order.id);
+      }
       
       // Update local state
-      setItems(items.map(i => i.id === item.id ? { ...i, status: 'cancelled' } : i));
+      setItems(updatedItems);
+      setOrder((prev) => (prev ? { ...prev, total_amount: newTotal } : prev));
       setCancelRequests(cancelRequests.filter(r => r.id !== cr.id));
       
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -355,38 +473,63 @@ export default function KOTScreen() {
     }
   };
 
+  const billableGrandTotal = useMemo(
+    () => calcBillableTotal(items),
+    [calcBillableTotal, items],
+  );
+  const grandTotal = billableGrandTotal;
+
   const handleGenerateBill = async () => {
+    if (!order?.id) {
+      Alert.alert('Warning', 'Please send KOT first to create the order.');
+      return;
+    }
     if (items.filter(i => i.status === 'pending').length > 0) {
       Alert.alert('Warning', 'You have pending items. Please Send KOT first.');
+      return;
+    }
+    if (items.filter(i => i.status !== 'cancelled').length === 0) {
+      Alert.alert('Warning', 'No billable items on this order.');
       return;
     }
     
     try {
       setProcessingBill(true);
       
-      // Get Max Invoice Number for this business
-      const { data: maxInvData, error: maxErr } = await supabase
+      const { data: maxInvData } = await supabase
         .from('orders')
         .select('invoice_number')
         .eq('business_id', businessInfo!.id)
+        .not('invoice_number', 'is', null)
         .order('invoice_number', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
         
       const nextInv = (maxInvData?.invoice_number || 0) + 1;
 
       const { error } = await supabase.from('orders').update({
         status: 'billed',
-        invoice_number: nextInv
-      }).eq('id', order!.id);
+        invoice_number: nextInv,
+        total_amount: billableGrandTotal,
+      }).eq('id', order.id);
 
       if (error) throw error;
 
+      const billedOrder = { ...order, status: 'billed' as const, invoice_number: nextInv, total_amount: billableGrandTotal };
       Alert.alert('Billed', `Bill generated. Invoice #${nextInv}`);
-      setOrder({ ...order!, status: 'billed', invoice_number: nextInv });
+      setOrder(billedOrder);
       
       // Auto-print bill
-      const html = generateReceiptHTML(businessInfo, { ...order!, invoice_number: nextInv }, items, grandTotal, tableName);
+      const paperSize = await getPrinterPaperSize();
+      const billableItems = items.filter((item) => item.status !== 'cancelled');
+      const html = generateReceiptHTML(
+        businessInfo!,
+        { ...billedOrder, type: effectiveOrderType },
+        billableItems,
+        billableGrandTotal,
+        displayTableName,
+        paperSize,
+      );
       await Print.printAsync({ html });
       
     } catch(e:any) {
@@ -401,13 +544,15 @@ export default function KOTScreen() {
     try {
       setProcessingBill(true);
       const { error } = await supabase.from('orders').update({
-        status: 'open'
+        status: 'open',
+        invoice_number: null,
+        total_amount: billableGrandTotal,
       }).eq('id', order!.id);
 
       if (error) throw error;
 
       Alert.alert('Success', 'Bill re-opened. You can now add more items.');
-      setOrder({ ...order!, status: 'open' });
+      setOrder({ ...order!, status: 'open', invoice_number: undefined, total_amount: billableGrandTotal });
     } catch(e:any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -419,11 +564,54 @@ export default function KOTScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (!order) return;
     try {
-      const html = generateReceiptHTML(businessInfo, order, items, grandTotal, tableName);
+      const paperSize = await getPrinterPaperSize();
+      const billableItems = items.filter((item) => item.status !== 'cancelled');
+      const html = generateReceiptHTML(
+        businessInfo!,
+        { ...order, type: effectiveOrderType },
+        billableItems,
+        billableGrandTotal,
+        displayTableName,
+        paperSize,
+      );
       await Print.printAsync({ html });
     } catch (e:any) {
       Alert.alert('Print Error', e.message);
     }
+  };
+
+  const handleReprintKOT = async () => {
+    if (!order?.kot_count) {
+      Alert.alert('Info', 'No KOT has been sent yet.');
+      return;
+    }
+
+    const kotItems = items.filter(
+      (item) => item.kot_number === order.kot_count && item.status !== 'cancelled',
+    );
+    if (kotItems.length === 0) {
+      Alert.alert('Info', 'No items found for the latest KOT.');
+      return;
+    }
+
+    try {
+      const paperSize = await getPrinterPaperSize();
+      const html = generateKOTHTML(
+        { type: effectiveOrderType, kot_count: order.kot_count },
+        kotItems,
+        displayTableName,
+        paperSize,
+      );
+      await Print.printAsync({ html });
+    } catch (e: any) {
+      Alert.alert('Print Error', e.message);
+    }
+  };
+
+  const openSettleModal = () => {
+    setCashAmount('');
+    setUpiAmount(billableGrandTotal.toFixed(2));
+    setBillModalVisible(true);
   };
 
   const settlePayment = async () => {
@@ -431,7 +619,7 @@ export default function KOTScreen() {
     const cash = Number(cashAmount) || 0;
     const upi = Number(upiAmount) || 0;
     const totalPaid = cash + upi;
-    const expected = order!.total_amount;
+    const expected = billableGrandTotal;
 
     if (totalPaid < expected) {
       Alert.alert('Error', 'Payment is less than total bill amount.');
@@ -442,7 +630,8 @@ export default function KOTScreen() {
       setProcessingBill(true);
       
       const { error } = await supabase.from('orders').update({
-        status: 'paid'
+        status: 'paid',
+        total_amount: expected,
       }).eq('id', order!.id);
       
       if (error) throw error;
@@ -487,7 +676,6 @@ export default function KOTScreen() {
   }
 
   const pendingCount = items.filter(i => i.status === 'pending').length;
-  const grandTotal = items.reduce((sum, i) => sum + (i.unit_price * i.qty), 0);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -498,7 +686,7 @@ export default function KOTScreen() {
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>
-            {orderType === 'takeaway' ? 'Takeaway' : tableName}
+            {effectiveOrderType === 'takeaway' ? 'Takeaway' : (displayTableName || 'Table')}
           </Text>
           <Text style={styles.headerSub}>
             {order?.status.toUpperCase() || 'NEW'} {order?.invoice_number ? `| INV-${order.invoice_number}` : ''}
@@ -603,14 +791,14 @@ export default function KOTScreen() {
               </TouchableOpacity>
             )}
 
-            {role !== 'waiter' && (order?.status === 'open' || (items.length > 0 && isNew)) && (
+            {role !== 'waiter' && order?.status === 'open' && order?.id && (
               <TouchableOpacity style={styles.billBtn} onPress={handleGenerateBill}>
                 <Text style={styles.btnText}>Generate Bill</Text>
               </TouchableOpacity>
             )}
 
             {role !== 'waiter' && order?.status === 'billed' && (
-              <TouchableOpacity style={styles.payBtn} onPress={() => setBillModalVisible(true)}>
+              <TouchableOpacity style={styles.payBtn} onPress={openSettleModal}>
                 <Text style={styles.btnText}>Settle Payment</Text>
               </TouchableOpacity>
             )}
@@ -618,8 +806,13 @@ export default function KOTScreen() {
             {role !== 'waiter' && (order?.status === 'billed' || order?.status === 'paid') && (
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={handleReprint}>
-                  <Text style={styles.secondaryBtnText}>Reprint</Text>
+                  <Text style={styles.secondaryBtnText}>Reprint Bill</Text>
                 </TouchableOpacity>
+                {(order?.kot_count || 0) > 0 && (
+                  <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={handleReprintKOT}>
+                    <Text style={styles.secondaryBtnText}>Reprint KOT</Text>
+                  </TouchableOpacity>
+                )}
                 {order?.status === 'billed' && (
                   <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={handleReopenBill}>
                     <Text style={styles.secondaryBtnText}>Re-open</Text>
@@ -716,7 +909,7 @@ export default function KOTScreen() {
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Settle Payment</Text>
-            <Text style={styles.totalPayText}>Total: ₹{order?.total_amount}</Text>
+            <Text style={styles.totalPayText}>Total: ₹{billableGrandTotal.toFixed(2)}</Text>
             
             <Text style={styles.modalSub}>Cash Amount</Text>
             <TextInput style={styles.notesInput} keyboardType="numeric" placeholder="₹0.00" placeholderTextColor={Colors.textSecondary} value={cashAmount} onChangeText={setCashAmount} />
@@ -730,6 +923,39 @@ export default function KOTScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.addBtn} onPress={settlePayment} disabled={processingBill}>
                 {processingBill ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.addBtnText}>Settle Bill</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Cancel reason modal (Android + fallback) */}
+      <Modal visible={cancelModalVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Cancel Item</Text>
+            <Text style={styles.modalSub}>Reason for cancellation?</Text>
+            <TextInput
+              style={styles.notesInput}
+              placeholder="e.g. Customer changed mind"
+              placeholderTextColor={Colors.textSecondary}
+              value={cancelReason}
+              onChangeText={setCancelReason}
+              multiline
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setCancelModalVisible(false);
+                  setCancelTargetItem(null);
+                  setCancelReason('');
+                }}
+              >
+                <Text style={styles.modalCancelBtnText}>Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addBtn} onPress={submitCancelRequest} disabled={loading}>
+                {loading ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.addBtnText}>Send Request</Text>}
               </TouchableOpacity>
             </View>
           </View>

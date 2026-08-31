@@ -26,8 +26,15 @@ const queryClient = new QueryClient({
   },
 });
 
+function getDefaultTabRoute(businessInfo: { role?: string; business_type?: string } | null) {
+  if (businessInfo?.role === 'waiter' && businessInfo?.business_type === 'restaurant') {
+    return '/(tabs)/tables';
+  }
+  return '/(tabs)/dashboard';
+}
+
 function RootNavigator() {
-  const { isReady, session, hasBusiness } = useAuth();
+  const { isReady, session, hasBusiness, businessInfo } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
@@ -54,9 +61,14 @@ function RootNavigator() {
     }
 
     if (group === '(auth)') {
-      router.replace('/(tabs)/dashboard');
+      router.replace(getDefaultTabRoute(businessInfo));
+      return;
     }
-  }, [hasBusiness, isReady, router, segments, session]);
+
+    if (group === '(tabs)' && screen === 'dashboard' && businessInfo?.role === 'waiter') {
+      router.replace('/(tabs)/tables');
+    }
+  }, [businessInfo, hasBusiness, isReady, router, segments, session]);
 
   return (
     <>

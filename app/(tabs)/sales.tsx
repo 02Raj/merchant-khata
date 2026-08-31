@@ -9,9 +9,9 @@ import { useAuth } from '@/context/AuthContext';
 import * as Haptics from 'expo-haptics';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { evaluateCreditLimit } from '@/lib/customerKhata';
+import { formatSaleBillNumber, getPrinterPaperSize } from '@/lib/printerSettings';
 
 type Customer = {
   id: string;
@@ -26,6 +26,7 @@ type Product = {
   name: string;
   sale_price: number;
   wholesale_price: number | null;
+  moq: number | null;
   stockCount: number;
   gst_rate: number;
   tax_inclusive: boolean;
@@ -65,8 +66,18 @@ export default function SalesScreen() {
   // Products search state
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Hybrid Pricing State
+  // Hybrid / wholesale pricing state
   const [pricingMode, setPricingMode] = useState<'retail' | 'wholesale'>('retail');
+
+  const showPricingToggle =
+    businessInfo?.business_type === 'both' || businessInfo?.business_type === 'wholesale';
+
+  const defaultPricingMode =
+    businessInfo?.business_type === 'wholesale' ? 'wholesale' : 'retail';
+
+  useEffect(() => {
+    setPricingMode(defaultPricingMode);
+  }, [defaultPricingMode]);
   
   // Cart state
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -134,7 +145,7 @@ export default function SalesScreen() {
     const { data, error } = await supabase
       .from('products')
       .select(`
-        id, name, sale_price, wholesale_price, gst_rate, tax_inclusive, is_active,
+        id, name, sale_price, wholesale_price, moq, gst_rate, tax_inclusive, is_active,
         alternate_unit, conversion_factor,
         inventory_transactions(quantity_change)
       `)
@@ -150,6 +161,7 @@ export default function SalesScreen() {
           name: p.name,
           sale_price: Number(p.sale_price),
           wholesale_price: p.wholesale_price ? Number(p.wholesale_price) : null,
+          moq: p.moq ? Number(p.moq) : null,
           stockCount: stock,
           gst_rate: Number(p.gst_rate) || 0,
           tax_inclusive: p.tax_inclusive,
@@ -180,13 +192,19 @@ export default function SalesScreen() {
           address: 'N/A', // Required in schema
           customer_type: finalCustomerType
         })
-        .select('id, name, customer_type')
+        .select('id, name, customer_type, credit_limit')
         .single();
         
       if (error) throw error;
       
       if (data) {
-        const newCust = { ...data, balance: 0 };
+        const newCust: Customer = {
+          id: data.id,
+          name: data.name,
+          customer_type: data.customer_type,
+          balance: 0,
+          credit_limit: data.credit_limit != null ? Number(data.credit_limit) : null,
+        };
         setCustomers(prev => [...prev, newCust]);
         setSelectedCustomer(newCust);
         setPricingMode(newCust.customer_type);
@@ -249,6 +267,25 @@ export default function SalesScreen() {
       }
     }
     setScannerVisible(true);
+  };
+
+  const getEffectiveQuantity = (item: CartItem): number => {
+    const parsedQty = Number(item.quantity) || 0;
+    const isAlt = item.selected_unit === 'alternate' && item.product.conversion_factor;
+    return isAlt ? parsedQty * item.product.conversion_factor! : parsedQty;
+  };
+
+  const getMoqViolations = (items: CartItem[]): string[] => {
+    const violations: string[] = [];
+    for (const item of items) {
+      if (!item.is_wholesale_rate) continue;
+      const moq = item.product.moq ?? 1;
+      const qty = getEffectiveQuantity(item);
+      if (qty < moq) {
+        violations.push(`${item.product.name}: minimum qty is ${moq}`);
+      }
+    }
+    return violations;
   };
 
   const addToCart = (product: Product) => {
@@ -417,13 +454,14 @@ export default function SalesScreen() {
         cart: [...cart],
         totals: { ...cartTotals },
         paymentType: paymentType,
-        date: new Date().toLocaleString('en-IN')
+        date: new Date().toLocaleString('en-IN'),
+        saleId: data as string,
       };
 
       // Reset
       setCart([]);
       setSelectedCustomer(null);
-      setPricingMode('retail');
+      setPricingMode(defaultPricingMode);
       setCheckoutModalVisible(false);
       setCartModalVisible(false);
       setPaymentType('cash');
@@ -449,6 +487,15 @@ export default function SalesScreen() {
     if (cart.length === 0) return;
     if (paymentType === 'credit' && !selectedCustomer) {
       setError('You must select a customer for Credit (Udhaar) sales.');
+      return;
+    }
+
+    const moqViolations = getMoqViolations(cart);
+    if (moqViolations.length > 0) {
+      Alert.alert(
+        'MOQ not met',
+        moqViolations.join('\n'),
+      );
       return;
     }
 
@@ -498,6 +545,7 @@ export default function SalesScreen() {
             </div>
             
             <div class="customer">
+              <strong>Bill No:</strong> ${formatSaleBillNumber(saleId)}<br/>
               <strong>Customer:</strong> ${snapshot.customer ? snapshot.customer.name : 'Walk-in (Retail)'}<br/>
               <strong>Date:</strong> ${snapshot.date}<br/>
               <strong>Payment Mode:</strong> ${snapshot.paymentType.toUpperCase()}
@@ -576,9 +624,9 @@ export default function SalesScreen() {
 
   const printThermalReceipt = async (snapshot: any) => {
     try {
-      const savedSize = await AsyncStorage.getItem('printerPaperSize');
-      const paperSize = (savedSize === '58mm' || savedSize === '80mm') ? savedSize : '80mm';
+      const paperSize = await getPrinterPaperSize();
       const pxWidth = paperSize === '58mm' ? 210 : 300;
+      const billNo = snapshot.saleId ? formatSaleBillNumber(snapshot.saleId) : 'N/A';
 
       const isWholesaleCustomer = snapshot.customer?.customer_type === 'wholesale';
       const previousBalance = snapshot.customer?.balance || 0;
@@ -615,6 +663,7 @@ export default function SalesScreen() {
           <div class="center">${isWholesaleCustomer ? 'WHOLESALE INVOICE' : 'TAX INVOICE'}</div>
           <div class="divider"></div>
           <div>
+            Bill No: ${billNo}<br>
             Date: ${snapshot.date}<br>
             Customer: ${snapshot.customer ? snapshot.customer.name : 'Walk-in'}<br>
             Mode: ${snapshot.paymentType.toUpperCase()}
@@ -705,7 +754,7 @@ export default function SalesScreen() {
           <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} style={{ marginLeft: 'auto' }} />
         </TouchableOpacity>
 
-        {businessInfo?.business_type === 'both' && (
+        {showPricingToggle && (
           <TouchableOpacity 
             style={[
               styles.customerSelector, 
@@ -820,7 +869,7 @@ export default function SalesScreen() {
 
                   <Text style={styles.cartItemPrice}>
                     ₹{(item.selected_unit === 'alternate' && item.product.conversion_factor ? item.unit_price * item.product.conversion_factor : item.unit_price).toFixed(2)} 
-                    {businessInfo?.business_type === 'both' && item.is_wholesale_rate && <Text style={styles.wholesaleBadge}> (Wholesale)</Text>}
+                    {showPricingToggle && item.is_wholesale_rate && <Text style={styles.wholesaleBadge}> (Wholesale)</Text>}
                   </Text>
                   {item.product.gst_rate > 0 && (
                     <Text style={styles.cartItemTax}>
@@ -900,7 +949,7 @@ export default function SalesScreen() {
             keyExtractor={c => c.id}
             ListHeaderComponent={
               !customerSearchQuery ? (
-                <TouchableOpacity style={styles.customerRow} onPress={() => { setSelectedCustomer(null); setPricingMode('retail'); setCustomerModalVisible(false); }}>
+                <TouchableOpacity style={styles.customerRow} onPress={() => { setSelectedCustomer(null); setPricingMode(defaultPricingMode); setCustomerModalVisible(false); }}>
                   <View style={[styles.customerAvatar, { backgroundColor: Colors.surfaceRaised }]}>
                     <Ionicons name="walk" size={20} color={Colors.textSecondary} />
                   </View>

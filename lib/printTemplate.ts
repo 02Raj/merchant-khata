@@ -1,57 +1,139 @@
-export const generateReceiptHTML = (
-  businessInfo: any,
-  order: any,
-  items: any[],
-  totalAmount: number,
-  tableName?: string
-) => {
-  const fssaiText = businessInfo.fssai_number ? `<div class="text-center fssai">FSSAI: ${businessInfo.fssai_number}</div>` : '';
-  const dateStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+import { type PaperSize, thermalPrintStyles } from '@/lib/printerSettings';
 
-  // Calculate taxes (assuming 5% GST total for restaurants, 2.5% CGST, 2.5% SGST on taxable amount)
-  // For MVP, we simply show it mathematically if tax_inclusive was not strictly enforced, but let's do a simple split.
-  // Assuming totalAmount is inclusive of 5% GST.
-  // Base Amount = Total / 1.05
-  // GST = Total - Base Amount
-  const baseAmount = totalAmount / 1.05;
-  const totalGst = totalAmount - baseAmount;
-  const cgst = totalGst / 2;
-  const sgst = totalGst / 2;
+type ReceiptBusinessInfo = {
+  name?: string;
+  address?: string;
+  phone?: string;
+  owner_phone?: string;
+  fssai_number?: string | null;
+};
 
-  let itemsHtml = items.map((item: any) => {
-    const qty = item.qty;
-    const name = item.product.name + (item.variant ? ` (${item.variant.name})` : '');
-    const price = item.unit_price;
-    const total = qty * price;
-    
-    let subItems = '';
-    if (item.modifiers && item.modifiers.length > 0) {
-      subItems = `<div class="item-sub"> + ${item.modifiers.map((m:any) => m.name).join(', ')}</div>`;
+type ReceiptItem = {
+  qty: number;
+  unit_price: number;
+  product: {
+    name: string;
+    gst_rate?: number;
+    tax_inclusive?: boolean;
+  };
+  variant?: { name: string } | null;
+  modifiers?: { name: string }[];
+  notes?: string;
+};
+
+function calculateReceiptTax(items: ReceiptItem[]) {
+  let taxableBase = 0;
+  let totalGst = 0;
+  const rateBreakdown: Record<number, { gst: number }> = {};
+
+  for (const item of items) {
+    const lineTotal = item.qty * item.unit_price;
+    const rate = Number(item.product?.gst_rate) || 0;
+    const inclusive = item.product?.tax_inclusive !== false;
+
+    let base = lineTotal;
+    let gst = 0;
+
+    if (rate > 0) {
+      if (inclusive) {
+        base = lineTotal / (1 + rate / 100);
+        gst = lineTotal - base;
+      } else {
+        base = lineTotal;
+        gst = lineTotal * (rate / 100);
+      }
     }
 
-    return `
+    taxableBase += base;
+    totalGst += gst;
+
+    if (rate > 0) {
+      if (!rateBreakdown[rate]) {
+        rateBreakdown[rate] = { gst: 0 };
+      }
+      rateBreakdown[rate].gst += gst;
+    }
+  }
+
+  return { taxableBase, totalGst, rateBreakdown };
+}
+
+function buildTaxRows(rateBreakdown: Record<number, { gst: number }>): string {
+  const rates = Object.keys(rateBreakdown)
+    .map(Number)
+    .filter((rate) => rate > 0)
+    .sort((a, b) => a - b);
+
+  if (rates.length === 0) {
+    return '';
+  }
+
+  return rates
+    .map((rate) => {
+      const gst = rateBreakdown[rate].gst;
+      const cgst = gst / 2;
+      const sgst = gst / 2;
+      const halfRate = (rate / 2).toFixed(1).replace(/\.0$/, '');
+      return `
+        <div class="tax-row">
+          <span>CGST (${halfRate}%)</span>
+          <span>₹${cgst.toFixed(2)}</span>
+        </div>
+        <div class="tax-row">
+          <span>SGST (${halfRate}%)</span>
+          <span>₹${sgst.toFixed(2)}</span>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+export const generateReceiptHTML = (
+  businessInfo: ReceiptBusinessInfo,
+  order: { invoice_number?: number; type?: string },
+  items: ReceiptItem[],
+  totalAmount: number,
+  tableName?: string,
+  paperSize: PaperSize = '58mm',
+) => {
+  const billableItems = items.filter((item: ReceiptItem & { status?: string }) => item.status !== 'cancelled');
+  const itemsForTax = billableItems.length > 0 ? billableItems : items;
+  const { taxableBase, totalGst, rateBreakdown } = calculateReceiptTax(itemsForTax);
+
+  const phone = businessInfo.phone || businessInfo.owner_phone;
+  const fssaiText = businessInfo.fssai_number
+    ? `<div class="text-center fssai">FSSAI: ${businessInfo.fssai_number}</div>`
+    : '';
+  const dateStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const taxRowsHtml = buildTaxRows(rateBreakdown);
+
+  const itemsHtml = itemsForTax
+    .map((item) => {
+      const qty = item.qty;
+      const name = item.product.name + (item.variant ? ` (${item.variant.name})` : '');
+      const total = qty * item.unit_price;
+
+      let subItems = '';
+      if (item.modifiers && item.modifiers.length > 0) {
+        subItems = `<div class="item-sub"> + ${item.modifiers.map((m) => m.name).join(', ')}</div>`;
+      }
+
+      return `
       <tr>
         <td class="item-name">${name}${subItems}</td>
         <td class="item-qty">${qty}</td>
         <td class="item-total">₹${total.toFixed(2)}</td>
       </tr>
     `;
-  }).join('');
+    })
+    .join('');
 
   return `
     <html>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
         <style>
-          @page { margin: 0; size: 58mm 200mm; } /* Default 58mm thermal roll */
-          body { 
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            margin: 0; 
-            padding: 10px; 
-            color: #000;
-            font-size: 12px;
-            line-height: 1.2;
-          }
+          ${thermalPrintStyles(paperSize)}
           .text-center { text-align: center; }
           .text-right { text-align: right; }
           .bold { font-weight: bold; }
@@ -83,8 +165,8 @@ export const generateReceiptHTML = (
       </head>
       <body>
         <div class="text-center title">${businessInfo.name || 'Restaurant'}</div>
-        <div class="text-center subtitle">${businessInfo.address || 'India'}</div>
-        <div class="text-center subtitle">${businessInfo.phone ? 'Ph: ' + businessInfo.phone : ''}</div>
+        <div class="text-center subtitle">${businessInfo.address || ''}</div>
+        <div class="text-center subtitle">${phone ? `Ph: ${phone}` : ''}</div>
         ${fssaiText}
         
         <div class="divider"></div>
@@ -122,16 +204,15 @@ export const generateReceiptHTML = (
         
         <div class="totals-row">
           <span>Subtotal</span>
-          <span>₹${baseAmount.toFixed(2)}</span>
+          <span>₹${taxableBase.toFixed(2)}</span>
         </div>
-        <div class="tax-row">
-          <span>CGST (2.5%)</span>
-          <span>₹${cgst.toFixed(2)}</span>
+        ${taxRowsHtml}
+        ${totalGst <= 0 ? '' : `
+        <div class="totals-row">
+          <span>Total GST</span>
+          <span>₹${totalGst.toFixed(2)}</span>
         </div>
-        <div class="tax-row">
-          <span>SGST (2.5%)</span>
-          <span>₹${sgst.toFixed(2)}</span>
-        </div>
+        `}
         
         <div class="totals-row grand-total">
           <span>Total Amount</span>
@@ -148,28 +229,30 @@ export const generateReceiptHTML = (
 };
 
 export const generateKOTHTML = (
-  order: any,
-  items: any[],
-  tableName?: string
+  order: { type?: string; kot_count?: number },
+  items: ReceiptItem[],
+  tableName?: string,
+  paperSize: PaperSize = '58mm',
 ) => {
   const dateStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
   const kotNumber = order.kot_count || 1;
 
-  let itemsHtml = items.map((item: any) => {
-    const qty = item.qty;
-    const name = item.product.name + (item.variant ? ` (${item.variant.name})` : '');
-    
-    let subItems = '';
-    if (item.modifiers && item.modifiers.length > 0) {
-      subItems = `<div class="item-sub"> + ${item.modifiers.map((m:any) => m.name).join(', ')}</div>`;
-    }
-    
-    let notesHtml = '';
-    if (item.notes) {
-      notesHtml = `<div class="item-notes">Note: ${item.notes}</div>`;
-    }
+  const itemsHtml = items
+    .map((item) => {
+      const qty = item.qty;
+      const name = item.product.name + (item.variant ? ` (${item.variant.name})` : '');
 
-    return `
+      let subItems = '';
+      if (item.modifiers && item.modifiers.length > 0) {
+        subItems = `<div class="item-sub"> + ${item.modifiers.map((m) => m.name).join(', ')}</div>`;
+      }
+
+      let notesHtml = '';
+      if (item.notes) {
+        notesHtml = `<div class="item-notes">Note: ${item.notes}</div>`;
+      }
+
+      return `
       <tr>
         <td class="item-qty">${qty} x</td>
         <td class="item-name">
@@ -180,22 +263,15 @@ export const generateKOTHTML = (
       </tr>
       <tr><td colspan="2"><div class="divider"></div></td></tr>
     `;
-  }).join('');
+    })
+    .join('');
 
   return `
     <html>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
         <style>
-          @page { margin: 0; size: 58mm auto; } 
-          body { 
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            margin: 0; 
-            padding: 10px; 
-            color: #000;
-            font-size: 14px;
-            line-height: 1.3;
-          }
+          ${thermalPrintStyles(paperSize)}
           .text-center { text-align: center; }
           .bold { font-weight: bold; }
           .title { font-size: 18px; font-weight: bold; margin-bottom: 4px; border: 1px solid #000; padding: 4px; display: inline-block; }
