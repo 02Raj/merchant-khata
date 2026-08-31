@@ -1,3 +1,5 @@
+import { normalizeCustomerType } from '@/lib/wholesaleHelpers';
+
 export type BusinessType = 'retail' | 'wholesale' | 'both' | 'restaurant';
 
 export type CreditLimitEvaluation = {
@@ -36,14 +38,30 @@ export function usesCreditLimit(businessType: BusinessType | string | undefined)
   return businessType === 'wholesale' || businessType === 'both';
 }
 
+export function showCustomerCreditLimitField(businessType: BusinessType | string | undefined): boolean {
+  return businessType !== 'restaurant';
+}
+
 export function evaluateCreditLimit(params: {
   businessType: BusinessType | string | undefined;
+  customerType?: string | null;
   currentBalance: number;
   creditLimit: number | null | undefined;
   billAmount: number;
-  paymentType: 'cash' | 'upi' | 'card' | 'credit';
+  paymentType: 'cash' | 'upi' | 'credit' | 'partial';
+  creditAmount?: number;
 }): CreditLimitEvaluation {
-  const applies = usesCreditLimit(params.businessType) && params.paymentType === 'credit';
+  const creditBillAmount =
+    params.creditAmount ??
+    (params.paymentType === 'credit' ? params.billAmount : 0);
+  const hasConfiguredLimit = params.creditLimit != null && params.creditLimit > 0;
+  const wholesaleCreditRules =
+    params.businessType === 'wholesale' ||
+    (params.businessType === 'both' &&
+      params.customerType != null &&
+      normalizeCustomerType(params.customerType) === 'wholesale');
+  const applies =
+    creditBillAmount > 0 && (wholesaleCreditRules || hasConfiguredLimit);
 
   if (!applies) {
     return {
@@ -57,7 +75,7 @@ export function evaluateCreditLimit(params: {
   }
 
   const limit = params.creditLimit ?? null;
-  const projectedBalance = params.currentBalance + Math.max(0, params.billAmount);
+  const projectedBalance = params.currentBalance + Math.max(0, creditBillAmount);
 
   if (limit == null || limit <= 0) {
     return {

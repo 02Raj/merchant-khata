@@ -5,6 +5,7 @@ import {
   evaluateCreditLimit,
   formatPhoneForWhatsApp,
   parseCreditLimitInput,
+  showCustomerCreditLimitField,
   usesCreditLimit,
 } from './customerKhata';
 
@@ -46,18 +47,39 @@ describe('usesCreditLimit', () => {
   });
 });
 
+describe('showCustomerCreditLimitField', () => {
+  it('shows for retail and wholesale but not restaurant', () => {
+    expect(showCustomerCreditLimitField('retail')).toBe(true);
+    expect(showCustomerCreditLimitField('wholesale')).toBe(true);
+    expect(showCustomerCreditLimitField('restaurant')).toBe(false);
+  });
+});
+
 describe('evaluateCreditLimit', () => {
-  it('ignores credit limit for retail businesses', () => {
+  it('ignores credit limit for retail when no limit is configured', () => {
     const result = evaluateCreditLimit({
       businessType: 'retail',
       currentBalance: 5000,
-      creditLimit: 1000,
+      creditLimit: null,
       billAmount: 500,
       paymentType: 'credit',
     });
 
     expect(result.applies).toBe(false);
     expect(result.exceeded).toBe(false);
+  });
+
+  it('enforces optional credit limit for retail customers', () => {
+    const result = evaluateCreditLimit({
+      businessType: 'retail',
+      currentBalance: 8000,
+      creditLimit: 10000,
+      billAmount: 3000,
+      paymentType: 'credit',
+    });
+
+    expect(result.applies).toBe(true);
+    expect(result.exceeded).toBe(true);
   });
 
   it('does not flag cash sales for wholesale', () => {
@@ -90,6 +112,7 @@ describe('evaluateCreditLimit', () => {
   it('flags udhaar that crosses credit limit', () => {
     const result = evaluateCreditLimit({
       businessType: 'both',
+      customerType: 'wholesale',
       currentBalance: 8000,
       creditLimit: 10000,
       billAmount: 3000,
@@ -99,6 +122,34 @@ describe('evaluateCreditLimit', () => {
     expect(result.exceeded).toBe(true);
     expect(result.message).toContain('Credit limit');
     expect(result.projectedBalance).toBe(11000);
+  });
+
+  it('hybrid retail customer without limit — credit rules do not apply', () => {
+    const result = evaluateCreditLimit({
+      businessType: 'both',
+      customerType: 'retail',
+      currentBalance: 5000,
+      creditLimit: null,
+      billAmount: 500,
+      paymentType: 'credit',
+    });
+
+    expect(result.applies).toBe(false);
+    expect(result.exceeded).toBe(false);
+  });
+
+  it('hybrid wholesale customer without limit — unlimited udhaar applies', () => {
+    const result = evaluateCreditLimit({
+      businessType: 'both',
+      customerType: 'wholesale',
+      currentBalance: 50000,
+      creditLimit: null,
+      billAmount: 10000,
+      paymentType: 'credit',
+    });
+
+    expect(result.applies).toBe(true);
+    expect(result.exceeded).toBe(false);
   });
 
   it('treats empty credit limit as unlimited', () => {

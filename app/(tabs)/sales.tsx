@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,13 +10,34 @@ import * as Haptics from 'expo-haptics';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { evaluateCreditLimit } from '@/lib/customerKhata';
-import { formatSaleBillNumber, getPrinterPaperSize } from '@/lib/printerSettings';
+import { evaluateCreditLimit, parseCreditLimitInput, showCustomerCreditLimitField } from '@/lib/customerKhata';
+import {
+  buildCartLineId,
+  customerTypeLabel,
+  mergeCartLines,
+  resolveCartUnitPrice,
+  resolveDefaultPricingMode,
+  resolveNewCustomerType,
+  resolvePricingModeFromCustomer,
+  shouldShowPricingToggle,
+  toggleCartLineRate,
+  walkInCustomerLabel,
+} from '@/lib/wholesaleHelpers';
+import { getPrinterPaperSize } from '@/lib/printerSettings';
+import { buildRetailPdfHtml, buildRetailThermalHtml, type RetailReceiptSnapshot } from '@/lib/retailReceipt';
+import {
+  computePayableTotal,
+  resolvePaymentSplit,
+  resolveSalePaymentType,
+  validateCheckoutPayment,
+} from '@/lib/salesCheckout';
+import { getMoqViolations, getStockViolations } from '@/lib/salesValidation';
+import { toE164India } from '@/lib/phone';
 
 type Customer = {
   id: string;
   name: string;
-  customer_type: 'retail' | 'wholesale';
+  customer_type: string;
   balance: number;
   credit_limit: number | null;
 };
@@ -32,9 +53,12 @@ type Product = {
   tax_inclusive: boolean;
   alternate_unit: string | null;
   conversion_factor: number | null;
+  barcode: string | null;
+  hsn_code: string | null;
 };
 
 type CartItem = {
+  lineId: string;
   product: Product;
   quantity: number | string;
   unit_price: number;
@@ -60,6 +84,7 @@ export default function SalesScreen() {
   const [addCustomerModalVisible, setAddCustomerModalVisible] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [newCustomerCreditLimit, setNewCustomerCreditLimit] = useState('');
   const [newCustomerType, setNewCustomerType] = useState<'retail' | 'wholesale'>('retail');
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   
@@ -69,11 +94,9 @@ export default function SalesScreen() {
   // Hybrid / wholesale pricing state
   const [pricingMode, setPricingMode] = useState<'retail' | 'wholesale'>('retail');
 
-  const showPricingToggle =
-    businessInfo?.business_type === 'both' || businessInfo?.business_type === 'wholesale';
+  const showPricingToggle = shouldShowPricingToggle(businessInfo?.business_type);
 
-  const defaultPricingMode =
-    businessInfo?.business_type === 'wholesale' ? 'wholesale' : 'retail';
+  const defaultPricingMode = resolveDefaultPricingMode(businessInfo?.business_type);
 
   useEffect(() => {
     setPricingMode(defaultPricingMode);
@@ -85,7 +108,12 @@ export default function SalesScreen() {
   
   // Checkout state
   const [checkoutModalVisible, setCheckoutModalVisible] = useState(false);
-  const [paymentType, setPaymentType] = useState<'cash' | 'upi' | 'card' | 'credit'>('cash');
+  const [paymentType, setPaymentType] = useState<'cash' | 'upi' | 'credit'>('cash');
+  const [paymentMode, setPaymentMode] = useState<'simple' | 'split'>('simple');
+  const [billDiscount, setBillDiscount] = useState('');
+  const [splitCash, setSplitCash] = useState('');
+  const [splitUpi, setSplitUpi] = useState('');
+  const lastScannedRef = useRef<{ code: string; at: number } | null>(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,7 +173,7 @@ export default function SalesScreen() {
     const { data, error } = await supabase
       .from('products')
       .select(`
-        id, name, sale_price, wholesale_price, moq, gst_rate, tax_inclusive, is_active,
+        id, name, sale_price, wholesale_price, moq, gst_rate, tax_inclusive, is_active, barcode, hsn_code,
         alternate_unit, conversion_factor,
         inventory_transactions(quantity_change)
       `)
@@ -167,6 +195,8 @@ export default function SalesScreen() {
           tax_inclusive: p.tax_inclusive,
           alternate_unit: p.alternate_unit || null,
           conversion_factor: p.conversion_factor ? Number(p.conversion_factor) : null,
+          barcode: p.barcode || null,
+          hsn_code: p.hsn_code || null,
         };
       });
       setProducts(parsed);
@@ -179,18 +209,31 @@ export default function SalesScreen() {
       return;
     }
     
-    const finalCustomerType = businessInfo?.business_type === 'both' ? newCustomerType : businessInfo?.business_type || 'retail';
+    const finalCustomerType = resolveNewCustomerType(businessInfo?.business_type, newCustomerType);
+
+    let phoneToSave = 'N/A';
+    if (newCustomerPhone.trim()) {
+      const phoneResult = toE164India(newCustomerPhone.trim());
+      if (!phoneResult.ok) {
+        Alert.alert('Invalid phone', phoneResult.error);
+        return;
+      }
+      phoneToSave = phoneResult.phone;
+    }
     
     setCreatingCustomer(true);
     try {
+      const creditLimit = showCreditLimitOnAddCustomer ? parseCreditLimitInput(newCustomerCreditLimit) : null;
+
       const { data, error } = await supabase
         .from('customers')
         .insert({
           business_id: businessInfo!.id,
           name: newCustomerName.trim(),
-          phone: newCustomerPhone.trim() || 'N/A', // Using N/A if phone is empty as we set phone NOT NULL in schema
-          address: 'N/A', // Required in schema
-          customer_type: finalCustomerType
+          phone: phoneToSave,
+          address: 'N/A',
+          customer_type: finalCustomerType,
+          credit_limit: creditLimit,
         })
         .select('id, name, customer_type, credit_limit')
         .single();
@@ -207,11 +250,12 @@ export default function SalesScreen() {
         };
         setCustomers(prev => [...prev, newCust]);
         setSelectedCustomer(newCust);
-        setPricingMode(newCust.customer_type);
+        setPricingMode(resolvePricingModeFromCustomer(newCust.customer_type));
         setAddCustomerModalVisible(false);
         setCustomerModalVisible(false);
         setNewCustomerName('');
         setNewCustomerPhone('');
+        setNewCustomerCreditLimit('');
       }
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to create customer');
@@ -221,9 +265,13 @@ export default function SalesScreen() {
   };
 
   const searchedProducts = useMemo(() => {
-    if (!searchQuery.trim()) return products; // Return ALL products if no search query
-    const lower = searchQuery.toLowerCase();
-    return products.filter(p => p.name.toLowerCase().includes(lower));
+    if (!searchQuery.trim()) return products;
+    const lower = searchQuery.toLowerCase().trim();
+    return products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(lower) ||
+        (p.barcode && p.barcode.toLowerCase().includes(lower)),
+    );
   }, [searchQuery, products]);
   
   const filteredCustomers = useMemo(() => {
@@ -232,20 +280,36 @@ export default function SalesScreen() {
     return customers.filter(c => c.name.toLowerCase().includes(lower));
   }, [customerSearchQuery, customers]);
 
-  const handleBarcodeScanned = async ({ type, data }: { type: string, data: string }) => {
+  const handleBarcodeScanned = async ({ data }: { type: string; data: string }) => {
+    const now = Date.now();
+    if (
+      lastScannedRef.current &&
+      lastScannedRef.current.code === data &&
+      now - lastScannedRef.current.at < 2000
+    ) {
+      return;
+    }
+    lastScannedRef.current = { code: data, at: now };
+
     setScannerVisible(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    
+
+    const localMatch = products.find((p) => p.barcode === data);
+    if (localMatch) {
+      addToCart(localMatch);
+      return;
+    }
+
     try {
       const { data: productData } = await supabase
         .from('products')
         .select('id')
         .eq('barcode', data)
         .eq('business_id', businessInfo!.id)
-        .single();
-        
+        .maybeSingle();
+
       if (productData) {
-        const prod = products.find(p => p.id === productData.id);
+        const prod = products.find((p) => p.id === productData.id);
         if (prod) {
           addToCart(prod);
           return;
@@ -275,42 +339,44 @@ export default function SalesScreen() {
     return isAlt ? parsedQty * item.product.conversion_factor! : parsedQty;
   };
 
-  const getMoqViolations = (items: CartItem[]): string[] => {
-    const violations: string[] = [];
-    for (const item of items) {
-      if (!item.is_wholesale_rate) continue;
-      const moq = item.product.moq ?? 1;
-      const qty = getEffectiveQuantity(item);
-      if (qty < moq) {
-        violations.push(`${item.product.name}: minimum qty is ${moq}`);
-      }
-    }
-    return violations;
-  };
+  const getMoqViolationsForCart = (items: CartItem[]) =>
+    getMoqViolations(
+      items.map((item) => ({
+        product: item.product,
+        quantity: item.quantity,
+        selected_unit: item.selected_unit,
+        is_wholesale_rate: item.is_wholesale_rate,
+      })),
+    );
 
   const addToCart = (product: Product) => {
-    const isWholesale = pricingMode === 'wholesale' && product.wholesale_price !== null;
-    const priceToUse = isWholesale ? product.wholesale_price! : product.sale_price;
+    if (pricingMode === 'wholesale' && product.wholesale_price === null) {
+      Alert.alert('Wholesale price missing', 'Set wholesale price on this product before billing in wholesale mode.');
+      return;
+    }
+
+    const { price: priceToUse, isWholesaleRate } = resolveCartUnitPrice(pricingMode, product);
+    const lineId = buildCartLineId(product.id, isWholesaleRate, 'base');
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     setCart(prev => {
-      const existing = prev.find(item => item.product.id === product.id);
+      const existing = prev.find(item => item.lineId === lineId);
       if (existing) {
-        return prev.map(item => 
-          item.product.id === product.id 
+        return prev.map(item =>
+          item.lineId === lineId
             ? { ...item, quantity: Number(item.quantity) + 1 }
-            : item
+            : item,
         );
       }
-      return [...prev, { product, quantity: 1, unit_price: priceToUse, is_wholesale_rate: !!isWholesale, selected_unit: 'base' }];
+      return [...prev, { lineId, product, quantity: 1, unit_price: priceToUse, is_wholesale_rate: isWholesaleRate, selected_unit: 'base' }];
     });
   };
 
-  const updateQuantity = (productId: string, delta: number) => {
+  const updateQuantity = (lineId: string, delta: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setCart(prev => prev.map(item => {
-      if (item.product.id === productId) {
+      if (item.lineId === lineId) {
         const newQ = Number(item.quantity) + delta;
         return newQ > 0 ? { ...item, quantity: newQ } : item;
       }
@@ -318,32 +384,53 @@ export default function SalesScreen() {
     }));
   };
 
-  const setDirectQuantity = (productId: string, val: string) => {
+  const setDirectQuantity = (lineId: string, val: string) => {
     setCart(prev => prev.map(item => {
-      if (item.product.id === productId) {
-        // Allow user to type string, including "."
+      if (item.lineId === lineId) {
         return { ...item, quantity: val };
       }
       return item;
     }));
   };
 
-  const removeFromCart = (productId: string) => {
+  const removeFromCart = (lineId: string) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    setCart(prev => prev.filter(item => item.product.id !== productId));
+    setCart(prev => prev.filter(item => item.lineId !== lineId));
     if (cart.length === 1) {
-      setCartModalVisible(false); // Close cart if last item is removed
+      setCartModalVisible(false);
     }
   };
 
-  // Switch cart pricing if customer changes
-  useEffect(() => {
-    setCart(prev => prev.map(item => {
-      const isWholesale = pricingMode === 'wholesale' && item.product.wholesale_price !== null;
-      const priceToUse = isWholesale ? item.product.wholesale_price! : item.product.sale_price;
-      return { ...item, unit_price: priceToUse, is_wholesale_rate: !!isWholesale };
-    }));
-  }, [pricingMode]);
+  const setLineUnit = (lineId: string, unit: 'base' | 'alternate') => {
+    setCart(prev => {
+      const current = prev.find((item) => item.lineId === lineId);
+      if (!current || current.selected_unit === unit) return prev;
+
+      const updated = {
+        ...current,
+        selected_unit: unit,
+        lineId: buildCartLineId(current.product.id, current.is_wholesale_rate, unit),
+      };
+      const remaining = prev.filter((item) => item.lineId !== lineId);
+      return mergeCartLines(remaining, updated);
+    });
+  };
+
+  const toggleLinePricing = (lineId: string) => {
+    setCart(prev => {
+      const current = prev.find((item) => item.lineId === lineId);
+      if (!current) return prev;
+
+      const { item: toggled, error } = toggleCartLineRate(current);
+      if (error) {
+        Alert.alert('Wholesale price missing', error);
+        return prev;
+      }
+
+      const remaining = prev.filter((item) => item.lineId !== lineId);
+      return mergeCartLines(remaining, toggled);
+    });
+  };
 
   const cartTotals = useMemo(() => {
     let subtotal = 0;
@@ -383,7 +470,8 @@ export default function SalesScreen() {
         subtotal: unit_price * effectiveQuantity,
         tax_rate: product.gst_rate,
         tax_amount: taxAmount * effectiveQuantity,
-        tax_inclusive: product.tax_inclusive
+        tax_inclusive: product.tax_inclusive,
+        is_wholesale_rate: item.is_wholesale_rate,
       };
     });
 
@@ -414,64 +502,110 @@ export default function SalesScreen() {
     return { grandTotal, taxTotal: pureTax, itemsForRpc };
   }, [cart]);
 
+  const showCreditLimitOnAddCustomer = showCustomerCreditLimitField(businessInfo?.business_type);
+
+  const discountAmount = useMemo(
+    () => Math.min(Math.max(0, Number(billDiscount) || 0), cartTotals.grandTotal),
+    [billDiscount, cartTotals.grandTotal],
+  );
+  const payableTotal = useMemo(
+    () => computePayableTotal(cartTotals.grandTotal, discountAmount),
+    [cartTotals.grandTotal, discountAmount],
+  );
+
+  const paymentResolution = useMemo(() => {
+    const { split, error } = resolvePaymentSplit({
+      paymentMode,
+      paymentType,
+      payableTotal,
+      splitCash: Number(splitCash) || 0,
+      splitUpi: Number(splitUpi) || 0,
+    });
+    const resolvedType = resolveSalePaymentType(split);
+    const validationError = error ?? validateCheckoutPayment({
+      split,
+      payableTotal,
+      hasCustomer: !!selectedCustomer,
+    });
+    return { split, resolvedType, validationError };
+  }, [paymentMode, paymentType, payableTotal, splitCash, splitUpi, selectedCustomer]);
+
   const creditLimitStatus = useMemo(() => {
     return evaluateCreditLimit({
       businessType: businessInfo?.business_type,
+      customerType: selectedCustomer?.customer_type ?? null,
       currentBalance: selectedCustomer?.balance ?? 0,
       creditLimit: selectedCustomer?.credit_limit ?? null,
-      billAmount: cartTotals.grandTotal,
-      paymentType,
+      billAmount: payableTotal,
+      paymentType: paymentResolution.resolvedType,
+      creditAmount: paymentResolution.split.credit,
     });
-  }, [businessInfo?.business_type, cartTotals.grandTotal, paymentType, selectedCustomer]);
+  }, [
+    businessInfo?.business_type,
+    payableTotal,
+    paymentResolution.resolvedType,
+    paymentResolution.split.credit,
+    selectedCustomer,
+  ]);
 
   const runCheckout = async () => {
     if (cart.length === 0) return;
-    if (paymentType === 'credit' && !selectedCustomer) {
-      setError('You must select a customer for Credit (Udhaar) sales.');
+
+    if (paymentResolution.validationError) {
+      setError(paymentResolution.validationError);
       return;
     }
 
     setProcessing(true);
     setError(null);
     try {
+      const { split, resolvedType } = paymentResolution;
       const { data, error: rpcError } = await supabase.rpc('process_checkout', {
         p_business_id: businessInfo!.id,
         p_customer_id: selectedCustomer?.id || null,
         p_created_by: session!.uid,
-        p_payment_type: paymentType,
-        p_total_amount: cartTotals.grandTotal,
+        p_payment_type: resolvedType,
+        p_total_amount: payableTotal,
         p_total_tax: cartTotals.taxTotal,
-        p_items: cartTotals.itemsForRpc
+        p_items: cartTotals.itemsForRpc,
+        p_discount: discountAmount,
+        p_cash_amount: split.cash,
+        p_upi_amount: split.upi,
+        p_credit_amount: split.credit,
       });
 
       if (rpcError) throw rpcError;
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // Prepare snapshot for printing before resetting
-      const printSnapshot = {
+      const printSnapshot: RetailReceiptSnapshot = {
         customer: selectedCustomer,
         cart: [...cart],
-        totals: { ...cartTotals },
-        paymentType: paymentType,
+        totals: { ...cartTotals, grandTotal: payableTotal },
+        paymentType: resolvedType,
+        paymentSplit: split,
+        discountAmount,
         date: new Date().toLocaleString('en-IN'),
         saleId: data as string,
       };
 
-      // Reset
       setCart([]);
       setSelectedCustomer(null);
       setPricingMode(defaultPricingMode);
       setCheckoutModalVisible(false);
       setCartModalVisible(false);
       setPaymentType('cash');
+      setPaymentMode('simple');
+      setBillDiscount('');
+      setSplitCash('');
+      setSplitUpi('');
       
       Alert.alert(
         'Success', 
         'Bill generated successfully!',
         [
           { text: 'Print Receipt', onPress: () => printThermalReceipt(printSnapshot) },
-          { text: 'Share PDF', onPress: () => shareBillAsPDF(data, printSnapshot) },
+          { text: 'Share PDF', onPress: () => shareBillAsPDF(printSnapshot) },
           { text: 'OK', style: 'cancel' }
         ]
       );
@@ -485,16 +619,26 @@ export default function SalesScreen() {
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
-    if (paymentType === 'credit' && !selectedCustomer) {
-      setError('You must select a customer for Credit (Udhaar) sales.');
+
+    if (paymentResolution.validationError) {
+      setError(paymentResolution.validationError);
       return;
     }
 
-    const moqViolations = getMoqViolations(cart);
+    const moqViolations = getMoqViolationsForCart(cart);
     if (moqViolations.length > 0) {
       Alert.alert(
         'MOQ not met',
         moqViolations.join('\n'),
+      );
+      return;
+    }
+
+    const stockViolations = getStockViolations(cart);
+    if (stockViolations.length > 0) {
+      Alert.alert(
+        'Insufficient stock',
+        stockViolations.join('\n'),
       );
       return;
     }
@@ -514,102 +658,15 @@ export default function SalesScreen() {
     await runCheckout();
   };
 
-  const shareBillAsPDF = async (saleId: string, snapshot: any) => {
+  const shareBillAsPDF = async (snapshot: RetailReceiptSnapshot) => {
     try {
-      const isWholesaleCustomer = snapshot.customer?.customer_type === 'wholesale';
-      const previousBalance = snapshot.customer?.balance || 0;
-      const currentBillAmount = snapshot.totals.grandTotal;
-      const totalOutstanding = previousBalance + currentBillAmount;
-
-      const html = `
-        <html>
-          <head>
-            <style>
-              body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; color: #333; }
-              .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-              .title { font-size: 24px; font-weight: bold; margin: 0; }
-              .subtitle { font-size: 14px; color: #666; margin-top: 5px; }
-              .customer { margin-bottom: 20px; font-size: 14px; }
-              table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-              th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-              th { background-color: #f8f8f8; font-weight: bold; }
-              .total-row { font-weight: bold; font-size: 16px; }
-              .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #888; }
-              .wholesale-badge { font-size: 10px; color: #c45c26; margin-left: 5px; border: 1px solid #c45c26; padding: 2px 4px; border-radius: 4px; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <p class="title">${(businessInfo as any)?.name || 'Retail Invoice'}</p>
-              <p class="subtitle">${isWholesaleCustomer ? 'Wholesale Tax Invoice' : 'Tax Invoice'}</p>
-            </div>
-            
-            <div class="customer">
-              <strong>Bill No:</strong> ${formatSaleBillNumber(saleId)}<br/>
-              <strong>Customer:</strong> ${snapshot.customer ? snapshot.customer.name : 'Walk-in (Retail)'}<br/>
-              <strong>Date:</strong> ${snapshot.date}<br/>
-              <strong>Payment Mode:</strong> ${snapshot.paymentType.toUpperCase()}
-            </div>
-            
-            <table>
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Qty</th>
-                  <th>Rate</th>
-                  <th style="text-align: right">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${snapshot.totals.itemsForRpc.map((item: any) => {
-                  const cartItem = snapshot.cart.find((c: any) => c.product.id === item.product_id);
-                  const prod = cartItem?.product;
-                  const isWholesaleRate = cartItem?.is_wholesale_rate;
-                  const isAlt = cartItem?.selected_unit === 'alternate' && prod?.conversion_factor;
-                  const parsedQty = Number(cartItem?.quantity) || 0;
-                  const displayQty = isAlt ? parsedQty + ' ' + prod.alternate_unit : item.quantity;
-                  const displayRate = isAlt ? item.unit_price * prod.conversion_factor : item.unit_price;
-                  return `
-                    <tr>
-                      <td>
-                        ${prod?.name || 'Item'}
-                        ${isWholesaleRate ? '<span class="wholesale-badge">WS Rate</span>' : ''}
-                      </td>
-                      <td>${displayQty}</td>
-                      <td>₹${displayRate.toFixed(2)}</td>
-                      <td style="text-align: right">₹${(item.unit_price * item.quantity).toFixed(2)}</td>
-                    </tr>
-                  `;
-                }).join('')}
-              </tbody>
-            </table>
-            
-            <div style="text-align: right; margin-top: 20px;">
-              <p>Subtotal: ₹${(snapshot.totals.grandTotal - snapshot.totals.taxTotal).toFixed(2)}</p>
-              <p>GST Amount: ₹${snapshot.totals.taxTotal.toFixed(2)}</p>
-              <p class="total-row">Grand Total: ₹${snapshot.totals.grandTotal.toFixed(2)}</p>
-            </div>
-
-            ${isWholesaleCustomer ? `
-              <div style="margin-top: 30px; padding: 15px; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-                <h3 style="margin-top: 0; color: #111827;">Account Ledger Summary</h3>
-                <table style="margin-bottom: 0;">
-                  <tr><td>Previous Balance (Udhaar):</td><td style="text-align: right">₹${previousBalance.toFixed(2)}</td></tr>
-                  <tr><td>Current Invoice Amount:</td><td style="text-align: right">₹${currentBillAmount.toFixed(2)}</td></tr>
-                  <tr class="total-row"><td><strong>Total Payable Balance:</strong></td><td style="text-align: right"><strong>₹${totalOutstanding.toFixed(2)}</strong></td></tr>
-                </table>
-              </div>
-            ` : ''}
-            
-            <div class="footer">
-              <p>Thank you for shopping with us!</p>
-              <p>Generated by OmniBill</p>
-            </div>
-          </body>
-        </html>
-      `;
+      const html = buildRetailPdfHtml(snapshot, {
+        name: businessInfo?.name,
+        gstin: businessInfo?.gstin,
+        businessType: businessInfo?.business_type,
+      });
       
-      const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 }); // A4 dimensions
+      const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
       
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
@@ -622,104 +679,14 @@ export default function SalesScreen() {
     }
   };
 
-  const printThermalReceipt = async (snapshot: any) => {
+  const printThermalReceipt = async (snapshot: RetailReceiptSnapshot) => {
     try {
       const paperSize = await getPrinterPaperSize();
-      const pxWidth = paperSize === '58mm' ? 210 : 300;
-      const billNo = snapshot.saleId ? formatSaleBillNumber(snapshot.saleId) : 'N/A';
-
-      const isWholesaleCustomer = snapshot.customer?.customer_type === 'wholesale';
-      const previousBalance = snapshot.customer?.balance || 0;
-      const currentBillAmount = snapshot.totals.grandTotal;
-      const totalOutstanding = previousBalance + currentBillAmount;
-
-      const html = `
-        <html lang="en">
-        <head>
-          <style>
-            @page { margin: 0; size: ${paperSize} auto; }
-            body { 
-              font-family: monospace; 
-              margin: 0; 
-              padding: 10px; 
-              width: ${pxWidth}px;
-              color: #000;
-              font-size: 14px;
-              line-height: 1.2;
-            }
-            .center { text-align: center; }
-            .bold { font-weight: bold; }
-            .title { font-size: 20px; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }
-            .divider { border-top: 1px dashed #000; margin: 8px 0; }
-            table { width: 100%; border-collapse: collapse; }
-            th, td { text-align: left; padding: 2px 0; vertical-align: top; }
-            th { border-bottom: 1px dashed #000; padding-bottom: 4px; }
-            .right { text-align: right; }
-            .item-name { max-width: 150px; word-wrap: break-word; }
-          </style>
-        </head>
-        <body>
-          <div class="center title">${(businessInfo as any)?.name || 'Retail Store'}</div>
-          <div class="center">${isWholesaleCustomer ? 'WHOLESALE INVOICE' : 'TAX INVOICE'}</div>
-          <div class="divider"></div>
-          <div>
-            Bill No: ${billNo}<br>
-            Date: ${snapshot.date}<br>
-            Customer: ${snapshot.customer ? snapshot.customer.name : 'Walk-in'}<br>
-            Mode: ${snapshot.paymentType.toUpperCase()}
-          </div>
-          <div class="divider"></div>
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th class="right">Qty</th>
-                <th class="right">Amt</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${snapshot.totals.itemsForRpc.map((item: any) => {
-                const cartItem = snapshot.cart.find((c: any) => c.product.id === item.product_id);
-                const prod = cartItem?.product;
-                const isWholesaleRate = cartItem?.is_wholesale_rate;
-                const isAlt = cartItem?.selected_unit === 'alternate' && prod?.conversion_factor;
-                const parsedQty = Number(cartItem?.quantity) || 0;
-                const displayQty = isAlt ? parsedQty + ' ' + prod.alternate_unit : item.quantity;
-                
-                return `
-                  <tr>
-                    <td class="item-name">${prod?.name.substring(0,18) || 'Item'}${isWholesaleRate ? '*' : ''}</td>
-                    <td class="right">${displayQty}</td>
-                    <td class="right">${(item.unit_price * item.quantity).toFixed(2)}</td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-          <div class="divider"></div>
-          <table>
-            <tr><td>Subtotal</td><td class="right">${(snapshot.totals.grandTotal - snapshot.totals.taxTotal).toFixed(2)}</td></tr>
-            <tr><td>GST</td><td class="right">${snapshot.totals.taxTotal.toFixed(2)}</td></tr>
-            <tr><td class="bold">Grand Total</td><td class="right bold">${snapshot.totals.grandTotal.toFixed(2)}</td></tr>
-          </table>
-          
-          ${isWholesaleCustomer ? `
-            <div class="divider"></div>
-            <div class="center bold">ACCOUNT SUMMARY</div>
-            <table>
-              <tr><td>Prev Udhaar:</td><td class="right">₹${previousBalance.toFixed(2)}</td></tr>
-              <tr><td>This Bill:</td><td class="right">₹${currentBillAmount.toFixed(2)}</td></tr>
-              <tr><td class="bold">Total Due:</td><td class="right bold">₹${totalOutstanding.toFixed(2)}</td></tr>
-            </table>
-          ` : ''}
-
-          <div class="divider"></div>
-          <div class="center">Thank you for shopping!</div>
-          <div class="center" style="font-size:10px; margin-top:8px;">Generated by OmniBill</div>
-        </body>
-        </html>
-      `;
-
+      const html = buildRetailThermalHtml(snapshot, {
+        name: businessInfo?.name,
+        gstin: businessInfo?.gstin,
+        businessType: businessInfo?.business_type,
+      }, paperSize);
       await Print.printAsync({ html });
     } catch (error) {
       console.error(error);
@@ -749,7 +716,9 @@ export default function SalesScreen() {
           <Ionicons name="person" size={20} color={selectedCustomer ? Colors.accent : Colors.textSecondary} />
           <View>
             <Text style={styles.customerLabel}>Customer</Text>
-            <Text style={styles.customerName}>{selectedCustomer ? selectedCustomer.name : 'Walk-in (Retail)'}</Text>
+            <Text style={styles.customerName}>
+              {selectedCustomer ? selectedCustomer.name : walkInCustomerLabel(businessInfo?.business_type)}
+            </Text>
           </View>
           <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} style={{ marginLeft: 'auto' }} />
         </TouchableOpacity>
@@ -843,7 +812,7 @@ export default function SalesScreen() {
           </View>
           <FlatList
             data={cart}
-            keyExtractor={item => item.product.id}
+            keyExtractor={item => item.lineId}
             contentContainerStyle={styles.cartList}
             renderItem={({ item }) => (
               <View style={styles.cartItem}>
@@ -854,13 +823,13 @@ export default function SalesScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 4 }}>
                       <TouchableOpacity 
                         style={[styles.unitToggleBtn, item.selected_unit === 'base' && styles.unitToggleBtnActive]}
-                        onPress={() => setCart(prev => prev.map(c => c.product.id === item.product.id ? { ...c, selected_unit: 'base' } : c))}
+                        onPress={() => setLineUnit(item.lineId, 'base')}
                       >
                         <Text style={[styles.unitToggleText, item.selected_unit === 'base' && styles.unitToggleTextActive]}>Piece</Text>
                       </TouchableOpacity>
                       <TouchableOpacity 
                         style={[styles.unitToggleBtn, item.selected_unit === 'alternate' && styles.unitToggleBtnActive]}
-                        onPress={() => setCart(prev => prev.map(c => c.product.id === item.product.id ? { ...c, selected_unit: 'alternate' } : c))}
+                        onPress={() => setLineUnit(item.lineId, 'alternate')}
                       >
                         <Text style={[styles.unitToggleText, item.selected_unit === 'alternate' && styles.unitToggleTextActive]}>{item.product.alternate_unit}</Text>
                       </TouchableOpacity>
@@ -870,7 +839,15 @@ export default function SalesScreen() {
                   <Text style={styles.cartItemPrice}>
                     ₹{(item.selected_unit === 'alternate' && item.product.conversion_factor ? item.unit_price * item.product.conversion_factor : item.unit_price).toFixed(2)} 
                     {showPricingToggle && item.is_wholesale_rate && <Text style={styles.wholesaleBadge}> (Wholesale)</Text>}
+                    {showPricingToggle && !item.is_wholesale_rate && <Text style={styles.retailBadge}> (Retail)</Text>}
                   </Text>
+                  {showPricingToggle && item.product.wholesale_price != null ? (
+                    <TouchableOpacity onPress={() => toggleLinePricing(item.lineId)}>
+                      <Text style={styles.lineRateToggle}>
+                        Switch to {item.is_wholesale_rate ? 'Retail' : 'Wholesale'} rate
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
                   {item.product.gst_rate > 0 && (
                     <Text style={styles.cartItemTax}>
                       +{item.product.gst_rate}% GST {item.product.tax_inclusive ? '(Inc)' : '(Exc)'}
@@ -878,21 +855,21 @@ export default function SalesScreen() {
                   )}
                 </View>
                 <View style={styles.qtyControl}>
-                  <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(item.product.id, -1)}>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(item.lineId, -1)}>
                     <Ionicons name="remove" size={20} color={Colors.textPrimary} />
                   </TouchableOpacity>
                   <TextInput 
                     style={styles.qtyInput}
                     value={item.quantity.toString()}
-                    onChangeText={(val) => setDirectQuantity(item.product.id, val)}
+                    onChangeText={(val) => setDirectQuantity(item.lineId, val)}
                     keyboardType="decimal-pad"
                     selectTextOnFocus={true}
                   />
-                  <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(item.product.id, 1)}>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(item.lineId, 1)}>
                     <Ionicons name="add" size={20} color={Colors.textPrimary} />
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity style={styles.deleteBtn} onPress={() => removeFromCart(item.product.id)}>
+                <TouchableOpacity style={styles.deleteBtn} onPress={() => removeFromCart(item.lineId)}>
                   <Ionicons name="trash-outline" size={20} color={Colors.warn} />
                 </TouchableOpacity>
               </View>
@@ -901,16 +878,38 @@ export default function SalesScreen() {
           />
           {cart.length > 0 && (
             <View style={styles.checkoutFooter}>
+              <View style={[styles.totalsRow, { marginBottom: 8 }]}>
+                <Text style={styles.totalsLabel}>Discount (₹)</Text>
+                <TextInput
+                  style={styles.discountInput}
+                  value={billDiscount}
+                  onChangeText={setBillDiscount}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={Colors.textSecondary}
+                />
+              </View>
+              {discountAmount > 0 ? (
+                <View style={styles.totalsRow}>
+                  <Text style={styles.totalsLabel}>Payable</Text>
+                  <Text style={styles.totalsValue}>₹{payableTotal.toFixed(2)}</Text>
+                </View>
+              ) : null}
               <View style={styles.totalsRow}>
                 <Text style={styles.totalsLabel}>GST Amount</Text>
                 <Text style={styles.totalsValue}>₹{cartTotals.taxTotal.toFixed(2)}</Text>
               </View>
               <View style={[styles.totalsRow, { marginBottom: 16 }]}>
                 <Text style={styles.grandTotalLabel}>Grand Total</Text>
-                <Text style={styles.grandTotalValue}>₹{cartTotals.grandTotal.toFixed(2)}</Text>
+                <Text style={styles.grandTotalValue}>₹{payableTotal.toFixed(2)}</Text>
               </View>
-              <TouchableOpacity style={styles.chargeButton} onPress={() => setCheckoutModalVisible(true)}>
-                <Text style={styles.chargeButtonText}>Charge ₹{cartTotals.grandTotal.toFixed(2)}</Text>
+              <TouchableOpacity style={styles.chargeButton} onPress={() => {
+                setPaymentMode('simple');
+                setSplitCash('');
+                setSplitUpi('');
+                setCheckoutModalVisible(true);
+              }}>
+                <Text style={styles.chargeButtonText}>Charge ₹{payableTotal.toFixed(2)}</Text>
                 <Ionicons name="arrow-forward" size={20} color={Colors.bg} />
               </TouchableOpacity>
             </View>
@@ -963,7 +962,7 @@ export default function SalesScreen() {
             renderItem={({ item }) => (
               <TouchableOpacity style={styles.customerRow} onPress={() => { 
                 setSelectedCustomer(item); 
-                setPricingMode(item.customer_type);
+                setPricingMode(resolvePricingModeFromCustomer(item.customer_type));
                 setCustomerModalVisible(false); 
               }}>
                 <View style={styles.customerAvatar}>
@@ -971,7 +970,7 @@ export default function SalesScreen() {
                 </View>
                 <View>
                   <Text style={styles.customerRowName}>{item.name}</Text>
-                  <Text style={styles.customerRowType}>{item.customer_type.toUpperCase()}</Text>
+                  <Text style={styles.customerRowType}>{customerTypeLabel(item.customer_type)}</Text>
                 </View>
               </TouchableOpacity>
             )}
@@ -1006,6 +1005,19 @@ export default function SalesScreen() {
               <Text style={styles.inputLabel}>Phone Number (Optional)</Text>
               <TextInput style={styles.inputField} value={newCustomerPhone} onChangeText={setNewCustomerPhone} placeholder="E.g. 9876543210" keyboardType="phone-pad" placeholderTextColor={Colors.textSecondary} />
             </View>
+            {showCreditLimitOnAddCustomer ? (
+              <View style={{ marginBottom: 24 }}>
+                <Text style={styles.inputLabel}>Credit Limit (Optional)</Text>
+                <TextInput
+                  style={styles.inputField}
+                  value={newCustomerCreditLimit}
+                  onChangeText={setNewCustomerCreditLimit}
+                  placeholder="Leave blank for no limit"
+                  keyboardType="decimal-pad"
+                  placeholderTextColor={Colors.textSecondary}
+                />
+              </View>
+            ) : null}
             {businessInfo?.business_type === 'both' && (
               <View style={{ marginBottom: 32 }}>
                 <Text style={styles.inputLabel}>Customer Type</Text>
@@ -1037,23 +1049,73 @@ export default function SalesScreen() {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.checkoutAmount}>₹{cartTotals.grandTotal.toFixed(2)}</Text>
+            <Text style={styles.checkoutAmount}>₹{payableTotal.toFixed(2)}</Text>
+            {discountAmount > 0 ? (
+              <Text style={styles.discountHint}>Includes ₹{discountAmount.toFixed(2)} discount</Text>
+            ) : null}
 
             <Text style={styles.paymentMethodLabel}>Select Payment Method</Text>
             <View style={styles.paymentMethods}>
-              <TouchableOpacity style={[styles.paymentBtn, paymentType === 'cash' && styles.paymentBtnActive]} onPress={() => setPaymentType('cash')}>
-                <Ionicons name="cash" size={24} color={paymentType === 'cash' ? Colors.bg : Colors.textPrimary} />
-                <Text style={[styles.paymentBtnText, paymentType === 'cash' && styles.paymentBtnTextActive]}>Cash</Text>
+              <TouchableOpacity
+                style={[styles.paymentBtn, paymentMode === 'simple' && paymentType === 'cash' && styles.paymentBtnActive]}
+                onPress={() => { setPaymentMode('simple'); setPaymentType('cash'); }}
+              >
+                <Ionicons name="cash" size={24} color={paymentMode === 'simple' && paymentType === 'cash' ? Colors.bg : Colors.textPrimary} />
+                <Text style={[styles.paymentBtnText, paymentMode === 'simple' && paymentType === 'cash' && styles.paymentBtnTextActive]}>Cash</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.paymentBtn, paymentType === 'upi' && styles.paymentBtnActive]} onPress={() => setPaymentType('upi')}>
-                <Ionicons name="qr-code" size={24} color={paymentType === 'upi' ? Colors.bg : Colors.textPrimary} />
-                <Text style={[styles.paymentBtnText, paymentType === 'upi' && styles.paymentBtnTextActive]}>UPI</Text>
+              <TouchableOpacity
+                style={[styles.paymentBtn, paymentMode === 'simple' && paymentType === 'upi' && styles.paymentBtnActive]}
+                onPress={() => { setPaymentMode('simple'); setPaymentType('upi'); }}
+              >
+                <Ionicons name="qr-code" size={24} color={paymentMode === 'simple' && paymentType === 'upi' ? Colors.bg : Colors.textPrimary} />
+                <Text style={[styles.paymentBtnText, paymentMode === 'simple' && paymentType === 'upi' && styles.paymentBtnTextActive]}>UPI</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.paymentBtn, paymentType === 'credit' && styles.paymentBtnActive]} onPress={() => setPaymentType('credit')}>
-                <Ionicons name="book" size={24} color={paymentType === 'credit' ? Colors.bg : Colors.warn} />
-                <Text style={[styles.paymentBtnText, paymentType === 'credit' && styles.paymentBtnTextActive]}>Udhaar</Text>
+              <TouchableOpacity
+                style={[styles.paymentBtn, paymentMode === 'simple' && paymentType === 'credit' && styles.paymentBtnActive]}
+                onPress={() => { setPaymentMode('simple'); setPaymentType('credit'); }}
+              >
+                <Ionicons name="book" size={24} color={paymentMode === 'simple' && paymentType === 'credit' ? Colors.bg : Colors.warn} />
+                <Text style={[styles.paymentBtnText, paymentMode === 'simple' && paymentType === 'credit' && styles.paymentBtnTextActive]}>Udhaar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.paymentBtn, paymentMode === 'split' && styles.paymentBtnActive]}
+                onPress={() => {
+                  setPaymentMode('split');
+                  setSplitCash('');
+                  setSplitUpi(payableTotal.toFixed(2));
+                }}
+              >
+                <Ionicons name="git-branch-outline" size={22} color={paymentMode === 'split' ? Colors.bg : Colors.textPrimary} />
+                <Text style={[styles.paymentBtnText, paymentMode === 'split' && styles.paymentBtnTextActive]}>Split</Text>
               </TouchableOpacity>
             </View>
+
+            {paymentMode === 'split' ? (
+              <View style={styles.splitSection}>
+                <Text style={styles.inputLabel}>Cash received</Text>
+                <TextInput
+                  style={styles.inputField}
+                  value={splitCash}
+                  onChangeText={setSplitCash}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={Colors.textSecondary}
+                />
+                <Text style={[styles.inputLabel, { marginTop: 12 }]}>UPI received</Text>
+                <TextInput
+                  style={styles.inputField}
+                  value={splitUpi}
+                  onChangeText={setSplitUpi}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={Colors.textSecondary}
+                />
+                <Text style={styles.splitBalanceText}>
+                  Udhaar balance: ₹{Math.max(0, payableTotal - (Number(splitCash) || 0) - (Number(splitUpi) || 0)).toFixed(2)}
+                  {!selectedCustomer && paymentResolution.split.credit > 0 ? ' (select customer)' : ''}
+                </Text>
+              </View>
+            ) : null}
 
             {creditLimitStatus.applies && creditLimitStatus.creditLimit ? (
               <View style={styles.creditLimitInfo}>
@@ -1156,6 +1218,8 @@ const styles = StyleSheet.create({
   cartItemName: { fontSize: 15, fontWeight: '600', color: Colors.textPrimary, marginBottom: 4 },
   cartItemPrice: { fontSize: 14, color: Colors.textPrimary, fontWeight: '500' },
   wholesaleBadge: { color: Colors.accent, fontSize: 11 },
+  retailBadge: { color: Colors.ok, fontSize: 11 },
+  lineRateToggle: { color: Colors.accent, fontSize: 12, fontWeight: '600', marginTop: 4 },
   cartItemTax: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
   unitToggleBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: Colors.border, marginRight: 8, backgroundColor: Colors.surface },
   unitToggleBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
@@ -1204,8 +1268,22 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 20, fontWeight: '700', color: Colors.textPrimary },
   checkoutAmount: { fontSize: 48, fontWeight: '700', color: Colors.textPrimary, textAlign: 'center', marginBottom: 32 },
   paymentMethodLabel: { fontSize: 14, fontWeight: '600', color: Colors.textSecondary, marginBottom: 12 },
-  paymentMethods: { flexDirection: 'row', gap: 12, marginBottom: 32 },
-  paymentBtn: { flex: 1, alignItems: 'center', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, gap: 8 },
+  discountInput: {
+    minWidth: 88,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    textAlign: 'right',
+    color: Colors.textPrimary,
+    backgroundColor: Colors.bg,
+  },
+  discountHint: { textAlign: 'center', color: Colors.textSecondary, fontSize: 13, marginBottom: 16, marginTop: -20 },
+  splitSection: { marginBottom: 20 },
+  splitBalanceText: { marginTop: 12, fontSize: 13, color: Colors.accentInk, fontWeight: '600' },
+  paymentMethods: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
+  paymentBtn: { width: '48%', alignItems: 'center', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, gap: 6 },
   paymentBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   paymentBtnText: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   paymentBtnTextActive: { color: Colors.bg },

@@ -10,6 +10,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
+import { validateWholesaleProductFields, validateWholesaleShopProduct } from '@/lib/wholesaleHelpers';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { getFirebaseAuth } from '@/lib/firebase';
@@ -79,6 +80,8 @@ export default function ProductsScreen() {
   const [formConversionFactor, setFormConversionFactor] = useState('');
   const [formOpeningStock, setFormOpeningStock] = useState('');
   const [originalStock, setOriginalStock] = useState(0);
+  const [formIsActive, setFormIsActive] = useState(true);
+  const [showInactive, setShowInactive] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const fetchProducts = async (isRefreshing = false) => {
@@ -168,6 +171,8 @@ export default function ProductsScreen() {
     setFormAlternateUnit('box');
     setFormConversionFactor('');
     setFormOpeningStock('');
+    setOriginalStock(0);
+    setFormIsActive(true);
     setFormError(null);
     setShowAdvancedOptions(false);
     setModalVisible(true);
@@ -194,6 +199,7 @@ export default function ProductsScreen() {
     setFormConversionFactor(product.conversion_factor ? product.conversion_factor.toString() : '');
     setFormOpeningStock(product.stockCount.toString());
     setOriginalStock(product.stockCount);
+    setFormIsActive(product.is_active);
     setFormError(null);
     
     const hasAdvancedData = Boolean(
@@ -326,17 +332,23 @@ export default function ProductsScreen() {
     if (businessInfo.business_type === 'wholesale' || businessInfo.business_type === 'both') {
       if (formWholesalePrice.trim()) {
         wholesale = parseFloat(formWholesalePrice);
-        if (isNaN(wholesale) || wholesale < 0) {
-          setFormError('Wholesale price must be a positive number.');
-          return;
-        }
       }
       if (formMoq.trim()) {
         moqVal = parseFloat(formMoq);
-        if (isNaN(moqVal) || moqVal <= 0) {
-          setFormError('MOQ must be a positive number greater than 0.');
-          return;
-        }
+      }
+      const wholesaleError = validateWholesaleProductFields({
+        wholesalePrice: wholesale,
+        moq: moqVal,
+      });
+      if (wholesaleError) {
+        setFormError(wholesaleError);
+        return;
+      }
+
+      const shopError = validateWholesaleShopProduct(businessInfo.business_type, wholesale);
+      if (shopError) {
+        setFormError(shopError);
+        return;
       }
     }
 
@@ -373,7 +385,7 @@ export default function ProductsScreen() {
         barcode: formBarcode.trim() || null,
         alternate_unit: altUnit,
         conversion_factor: convFactor,
-        is_active: true,
+        is_active: formIsActive,
       };
 
       if (editingId) {
@@ -428,10 +440,11 @@ export default function ProductsScreen() {
     }
   };
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.category.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredProducts = products.filter((p) => {
+    if (!showInactive && !p.is_active) return false;
+    const q = searchQuery.toLowerCase();
+    return p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+  });
 
   const renderProductItem = ({ item }: { item: Product }) => {
     let stockStatus = 'In Stock';
@@ -460,12 +473,19 @@ export default function ProductsScreen() {
         }}
       >
         <View style={styles.productHeader}>
-          <Text style={styles.productName}>{item.name}</Text>
+          <Text style={[styles.productName, !item.is_active && { opacity: 0.5 }]}>{item.name}</Text>
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+            {!item.is_active ? (
+              <View style={[styles.stockBadge, { backgroundColor: Colors.textSecondary + '20' }]}>
+                <Text style={[styles.stockText, { color: Colors.textSecondary, fontSize: 10 }]}>Inactive</Text>
+              </View>
+            ) : null}
           <View style={[styles.stockBadge, { backgroundColor: stockColor + '20' }]}>
             <View style={[styles.stockDot, { backgroundColor: stockColor }]} />
             <Text style={[styles.stockText, { color: stockColor }]}>
               {item.stockCount} {item.unit}
             </Text>
+          </View>
           </View>
         </View>
         
@@ -524,6 +544,12 @@ export default function ProductsScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      <TouchableOpacity onPress={() => setShowInactive((v) => !v)} style={styles.inactiveToggle}>
+        <Text style={styles.inactiveToggleText}>
+          {showInactive ? 'Hide inactive products' : 'Show inactive products'}
+        </Text>
+      </TouchableOpacity>
 
       {/* List */}
       {loading ? (
@@ -765,6 +791,18 @@ export default function ProductsScreen() {
                 </View>
               )}
 
+              {editingId ? (
+                <TouchableOpacity
+                  style={styles.activeToggleRow}
+                  onPress={() => setFormIsActive((v) => !v)}
+                >
+                  <Text style={styles.label}>Active in sales</Text>
+                  <Text style={[styles.activeToggleValue, { color: formIsActive ? Colors.ok : Colors.warn }]}>
+                    {formIsActive ? 'Yes' : 'No (hidden from POS)'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+
               {formError && (
                 <View style={styles.errorContainer}>
                   <Text style={styles.errorText}>{formError}</Text>
@@ -825,6 +863,10 @@ const styles = StyleSheet.create({
   scanAddButton: { flexDirection: 'row', backgroundColor: Colors.ok, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, alignItems: 'center', gap: 6 },
   addButtonText: { color: Colors.bg, fontWeight: '700', fontSize: 14 },
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface, marginHorizontal: 20, marginBottom: 16, borderRadius: 12, paddingHorizontal: 12, height: 48, borderWidth: 1, borderColor: Colors.border },
+  inactiveToggle: { paddingHorizontal: 20, marginTop: -8, marginBottom: 12 },
+  inactiveToggleText: { color: Colors.accent, fontWeight: '600', fontSize: 13 },
+  activeToggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, padding: 12, backgroundColor: Colors.surface, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
+  activeToggleValue: { fontWeight: '700' },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, color: Colors.textPrimary, fontSize: 16 },
   listContent: { paddingHorizontal: 20, paddingBottom: 40, gap: 12 },

@@ -218,7 +218,7 @@ export default function DashboardScreen() {
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Recent Activity</Text>
-                <TouchableOpacity>
+                <TouchableOpacity onPress={() => router.push('/sales-history' as never)}>
                   <Text style={styles.seeAllText}>See All</Text>
                 </TouchableOpacity>
               </View>

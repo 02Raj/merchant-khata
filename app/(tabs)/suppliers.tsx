@@ -13,6 +13,7 @@ import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
+import { toE164India } from '@/lib/phone';
 
 type Supplier = {
   id: string;
@@ -30,7 +31,7 @@ type LedgerEntry = {
 };
 
 export default function SuppliersScreen() {
-  const { businessInfo } = useAuth();
+  const { businessInfo, session } = useAuth();
   
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +42,7 @@ export default function SuppliersScreen() {
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [formName, setFormName] = useState('');
   const [formPhone, setFormPhone] = useState('');
+  const [formAddress, setFormAddress] = useState('');
   const [savingSupplier, setSavingSupplier] = useState(false);
 
   // Khata / Ledger Modal
@@ -58,6 +60,9 @@ export default function SuppliersScreen() {
   // Direct Purchase Modal
   const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
   const [purchaseAmount, setPurchaseAmount] = useState('');
+  const [purchaseProductId, setPurchaseProductId] = useState<string | null>(null);
+  const [purchaseQty, setPurchaseQty] = useState('');
+  const [purchaseProducts, setPurchaseProducts] = useState<{ id: string; name: string; purchase_price: number }[]>([]);
   const [processingPurchase, setProcessingPurchase] = useState(false);
 
   const fetchSuppliers = async (isRefreshing = false) => {
@@ -116,6 +121,16 @@ export default function SuppliersScreen() {
       return;
     }
 
+    let phoneToSave = 'N/A';
+    if (formPhone.trim()) {
+      const phoneResult = toE164India(formPhone.trim());
+      if (!phoneResult.ok) {
+        Alert.alert('Invalid phone', phoneResult.error);
+        return;
+      }
+      phoneToSave = phoneResult.phone;
+    }
+
     setSavingSupplier(true);
     try {
       const { error } = await supabase
@@ -123,8 +138,8 @@ export default function SuppliersScreen() {
         .insert({
           business_id: businessInfo!.id,
           name: formName.trim(),
-          phone: formPhone.trim() || 'N/A',
-          address: 'N/A'
+          phone: phoneToSave,
+          address: formAddress.trim() || 'N/A',
         });
 
       if (error) throw error;
@@ -133,6 +148,7 @@ export default function SuppliersScreen() {
       setAddModalVisible(false);
       setFormName('');
       setFormPhone('');
+      setFormAddress('');
       fetchSuppliers();
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -173,10 +189,25 @@ export default function SuppliersScreen() {
     setPaymentModalVisible(true);
   };
 
-  const openPurchaseModal = () => {
+  const openPurchaseModal = async () => {
     if (!selectedSupplier) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPurchaseAmount('');
+    setPurchaseProductId(null);
+    setPurchaseQty('');
+
+    const { data } = await supabase
+      .from('products')
+      .select('id, name, purchase_price')
+      .eq('business_id', businessInfo!.id)
+      .eq('is_active', true)
+      .order('name');
+    setPurchaseProducts((data || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      purchase_price: Number(p.purchase_price),
+    })));
+
     setPurchaseModalVisible(true);
   };
 
@@ -187,35 +218,37 @@ export default function SuppliersScreen() {
       return;
     }
 
+    const items = [];
+    if (purchaseProductId && purchaseQty.trim()) {
+      const qty = parseFloat(purchaseQty);
+      if (isNaN(qty) || qty <= 0) {
+        Alert.alert('Error', 'Enter a valid stock quantity');
+        return;
+      }
+      const product = purchaseProducts.find((p) => p.id === purchaseProductId);
+      if (!product) {
+        Alert.alert('Error', 'Select a valid product');
+        return;
+      }
+      items.push({
+        product_id: product.id,
+        quantity: qty,
+        unit_cost: product.purchase_price,
+        subtotal: qty * product.purchase_price,
+      });
+    }
+
     setProcessingPurchase(true);
     try {
-      // 1. Create a Purchase record
-      const { data: purchaseData, error: purchaseError } = await supabase
-        .from('purchases')
-        .insert({
-          business_id: businessInfo!.id,
-          supplier_id: selectedSupplier!.id,
-          total_amount: amount,
-          created_by: 'owner'
-        })
-        .select('id')
-        .single();
+      const { error } = await supabase.rpc('record_supplier_purchase', {
+        p_business_id: businessInfo!.id,
+        p_supplier_id: selectedSupplier!.id,
+        p_created_by: session?.uid || 'owner',
+        p_total_amount: amount,
+        p_items: items,
+      });
 
-      if (purchaseError) throw purchaseError;
-
-      // 2. Add to Ledger (Credit - we owe them)
-      const { error: ledgerError } = await supabase
-        .from('ledger_transactions')
-        .insert({
-          business_id: businessInfo!.id,
-          supplier_id: selectedSupplier!.id,
-          amount: amount,
-          transaction_type: 'credit',
-          source_type: 'purchase',
-          source_id: purchaseData.id
-        });
-
-      if (ledgerError) throw ledgerError;
+      if (error) throw error;
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setPurchaseModalVisible(false);
@@ -223,8 +256,9 @@ export default function SuppliersScreen() {
       setSelectedSupplier(prev => prev ? {...prev, balance: prev.balance + amount} : null);
       await openSupplierKhata(selectedSupplier!);
       fetchSuppliers();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Purchase error:', error);
+      Alert.alert('Purchase failed', error?.message || 'Could not record purchase.');
     } finally {
       setProcessingPurchase(false);
     }
@@ -276,8 +310,9 @@ export default function SuppliersScreen() {
       await openSupplierKhata(selectedSupplier!);
       fetchSuppliers();
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Payment error:', error);
+      Alert.alert('Payment failed', error?.message || 'Could not record payment.');
     } finally {
       setProcessingPayment(false);
     }
@@ -389,6 +424,11 @@ export default function SuppliersScreen() {
               <Text style={styles.label}>Phone Number</Text>
               <TextInput style={styles.input} value={formPhone} onChangeText={setFormPhone} keyboardType="phone-pad" placeholder="9876543210" />
             </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Address</Text>
+              <TextInput style={styles.input} value={formAddress} onChangeText={setFormAddress} placeholder="Godown, city" />
+            </View>
             
             <TouchableOpacity style={styles.submitBtn} onPress={handleAddSupplier} disabled={savingSupplier}>
               {savingSupplier ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Save Supplier</Text>}
@@ -490,8 +530,41 @@ export default function SuppliersScreen() {
                 placeholder="0.00" 
               />
             </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Link stock (optional)</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                <TouchableOpacity
+                  style={[styles.methodBtn, !purchaseProductId && styles.methodBtnActive]}
+                  onPress={() => setPurchaseProductId(null)}
+                >
+                  <Text style={[styles.methodBtnText, !purchaseProductId && styles.methodBtnTextActive]}>None</Text>
+                </TouchableOpacity>
+                {purchaseProducts.map((product) => (
+                  <TouchableOpacity
+                    key={product.id}
+                    style={[styles.methodBtn, purchaseProductId === product.id && styles.methodBtnActive, { marginLeft: 8 }]}
+                    onPress={() => setPurchaseProductId(product.id)}
+                  >
+                    <Text style={[styles.methodBtnText, purchaseProductId === product.id && styles.methodBtnTextActive]}>
+                      {product.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              {purchaseProductId ? (
+                <TextInput
+                  style={styles.input}
+                  value={purchaseQty}
+                  onChangeText={setPurchaseQty}
+                  keyboardType="numeric"
+                  placeholder="Quantity received"
+                />
+              ) : null}
+            </View>
+
             <Text style={{ color: Colors.textSecondary, marginBottom: 20 }}>
-              * This will immediately add to your payable Khata. For inventory updates, you must edit product stock manually for now.
+              Bill amount is added to supplier khata. If you link a product, stock increases automatically.
             </Text>
             
             <TouchableOpacity style={[styles.submitBtn, { backgroundColor: Colors.warn }]} onPress={handleAddPurchase} disabled={processingPurchase}>

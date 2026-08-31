@@ -11,8 +11,10 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
-import { parseCreditLimitInput, usesCreditLimit } from '@/lib/customerKhata';
+import { showCustomerCreditLimitField, parseCreditLimitInput } from '@/lib/customerKhata';
+import { customerTypeLabel, normalizeCustomerType, resolveNewCustomerType } from '@/lib/wholesaleHelpers';
 import { openWhatsAppUdhaarReminder } from '@/lib/whatsapp';
+import { toE164India } from '@/lib/phone';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
 
@@ -45,9 +47,16 @@ export default function CustomersScreen() {
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [formName, setFormName] = useState('');
   const [formPhone, setFormPhone] = useState('');
+  const [formAddress, setFormAddress] = useState('');
+  const [formCustomerType, setFormCustomerType] = useState<'retail' | 'wholesale'>('retail');
   const [formCreditLimit, setFormCreditLimit] = useState('');
   const [savingCustomer, setSavingCustomer] = useState(false);
-  const showCreditLimitField = usesCreditLimit(businessInfo?.business_type);
+  const showCreditLimitField = showCustomerCreditLimitField(businessInfo?.business_type);
+
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editCustomerType, setEditCustomerType] = useState<'retail' | 'wholesale'>('retail');
+  const [editCreditLimit, setEditCreditLimit] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Khata / Ledger Modal
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -117,6 +126,18 @@ export default function CustomersScreen() {
       return;
     }
 
+    let phoneToSave = 'N/A';
+    if (formPhone.trim()) {
+      const phoneResult = toE164India(formPhone.trim());
+      if (!phoneResult.ok) {
+        Alert.alert('Invalid phone', phoneResult.error);
+        return;
+      }
+      phoneToSave = phoneResult.phone;
+    }
+
+    const customerType = resolveNewCustomerType(businessInfo?.business_type, formCustomerType);
+
     setSavingCustomer(true);
     try {
       const creditLimit = showCreditLimitField ? parseCreditLimitInput(formCreditLimit) : null;
@@ -125,9 +146,9 @@ export default function CustomersScreen() {
         .insert({
           business_id: businessInfo!.id,
           name: formName.trim(),
-          phone: formPhone.trim() || 'N/A',
-          address: 'N/A',
-          customer_type: businessInfo?.business_type === 'retail' ? 'retail' : 'wholesale',
+          phone: phoneToSave,
+          address: formAddress.trim() || 'N/A',
+          customer_type: customerType,
           credit_limit: creditLimit,
         });
 
@@ -137,6 +158,8 @@ export default function CustomersScreen() {
       setAddModalVisible(false);
       setFormName('');
       setFormPhone('');
+      setFormAddress('');
+      setFormCustomerType('retail');
       setFormCreditLimit('');
       fetchCustomers();
     } catch (error) {
@@ -145,6 +168,50 @@ export default function CustomersScreen() {
       console.error(error);
     } finally {
       setSavingCustomer(false);
+    }
+  };
+
+  const openEditCustomer = () => {
+    if (!selectedCustomer) return;
+    setEditCustomerType(normalizeCustomerType(selectedCustomer.customer_type));
+    setEditCreditLimit(
+      selectedCustomer.credit_limit != null ? String(selectedCustomer.credit_limit) : '',
+    );
+    setEditModalVisible(true);
+  };
+
+  const handleUpdateCustomer = async () => {
+    if (!selectedCustomer || !businessInfo?.id) return;
+
+    const customerType = resolveNewCustomerType(businessInfo?.business_type, editCustomerType);
+    const creditLimit = showCreditLimitField ? parseCreditLimitInput(editCreditLimit) : null;
+
+    setSavingEdit(true);
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .update({
+          customer_type: customerType,
+          credit_limit: creditLimit,
+        })
+        .eq('id', selectedCustomer.id)
+        .eq('business_id', businessInfo.id);
+
+      if (error) throw error;
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setEditModalVisible(false);
+      setSelectedCustomer({
+        ...selectedCustomer,
+        customer_type: customerType,
+        credit_limit: creditLimit,
+      });
+      fetchCustomers();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update customer');
+      console.error(error);
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -187,48 +254,26 @@ export default function CustomersScreen() {
 
     setProcessingPayment(true);
     try {
-      // Insert Payment
-      const { data: paymentData, error: paymentError } = await supabase
-        .from('payments')
-        .insert({
-          business_id: businessInfo!.id,
-          related_type: 'customer',
-          related_id: selectedCustomer!.id,
-          amount: amount,
-          direction: 'received',
-          method: paymentMethod
-        })
-        .select('id')
-        .single();
+      const { error } = await supabase.rpc('receive_customer_payment', {
+        p_business_id: businessInfo!.id,
+        p_customer_id: selectedCustomer!.id,
+        p_amount: amount,
+        p_method: paymentMethod,
+      });
 
-      if (paymentError) throw paymentError;
-
-      // Insert Ledger Credit
-      const { error: ledgerError } = await supabase
-        .from('ledger_transactions')
-        .insert({
-          business_id: businessInfo!.id,
-          customer_id: selectedCustomer!.id,
-          amount: amount,
-          transaction_type: 'credit',
-          source_type: 'payment',
-          source_id: paymentData.id
-        });
-
-      if (ledgerError) throw ledgerError;
+      if (error) throw error;
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setPaymentModalVisible(false);
       
-      // Update local state temporarily so UI feels fast
       setSelectedCustomer(prev => prev ? {...prev, balance: prev.balance - amount} : null);
       
-      // Re-fetch data
       await openCustomerKhata(selectedCustomer!);
       fetchCustomers();
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Payment error:', error);
+      Alert.alert('Payment failed', error?.message || 'Could not record payment. Please try again.');
     } finally {
       setProcessingPayment(false);
     }
@@ -306,6 +351,9 @@ export default function CustomersScreen() {
               <View style={styles.customerInfo}>
                 <Text style={styles.customerName}>{item.name}</Text>
                 <Text style={styles.customerPhone}>{item.phone}</Text>
+                {businessInfo?.business_type !== 'retail' ? (
+                  <Text style={styles.customerTypeBadge}>{customerTypeLabel(item.customer_type)}</Text>
+                ) : null}
               </View>
               <View style={styles.customerBalanceContainer}>
                 {item.balance > 0 ? (
@@ -351,6 +399,31 @@ export default function CustomersScreen() {
               <TextInput style={styles.input} value={formPhone} onChangeText={setFormPhone} keyboardType="phone-pad" placeholder="9876543210" />
             </View>
 
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Address</Text>
+              <TextInput style={styles.input} value={formAddress} onChangeText={setFormAddress} placeholder="Shop no, street, city" />
+            </View>
+
+            {businessInfo?.business_type === 'both' ? (
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Customer Type</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    style={[styles.methodBtn, formCustomerType === 'retail' && styles.methodBtnActive]}
+                    onPress={() => setFormCustomerType('retail')}
+                  >
+                    <Text style={[styles.methodBtnText, formCustomerType === 'retail' && styles.methodBtnTextActive]}>Retail</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.methodBtn, formCustomerType === 'wholesale' && styles.methodBtnActive]}
+                    onPress={() => setFormCustomerType('wholesale')}
+                  >
+                    <Text style={[styles.methodBtnText, formCustomerType === 'wholesale' && styles.methodBtnTextActive]}>Wholesale</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
+
             {showCreditLimitField ? (
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Credit Limit (₹) — optional</Text>
@@ -382,6 +455,9 @@ export default function CustomersScreen() {
               <Text style={styles.modalTitle}>{selectedCustomer?.name}</Text>
               <Text style={styles.subtitle}>{selectedCustomer?.phone}</Text>
             </View>
+            <TouchableOpacity onPress={openEditCustomer} style={styles.closeBtn}>
+              <Ionicons name="create-outline" size={22} color={Colors.accent} />
+            </TouchableOpacity>
           </View>
 
           <View style={styles.ledgerBalanceHeader}>
@@ -448,6 +524,57 @@ export default function CustomersScreen() {
             </TouchableOpacity>
           </View>
         </SafeAreaView>
+      </Modal>
+
+      {/* EDIT CUSTOMER MODAL */}
+      <Modal visible={editModalVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Customer</Text>
+              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            {businessInfo?.business_type === 'both' ? (
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Customer Type</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    style={[styles.methodBtn, editCustomerType === 'retail' && styles.methodBtnActive]}
+                    onPress={() => setEditCustomerType('retail')}
+                  >
+                    <Text style={[styles.methodBtnText, editCustomerType === 'retail' && styles.methodBtnTextActive]}>Retail</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.methodBtn, editCustomerType === 'wholesale' && styles.methodBtnActive]}
+                    onPress={() => setEditCustomerType('wholesale')}
+                  >
+                    <Text style={[styles.methodBtnText, editCustomerType === 'wholesale' && styles.methodBtnTextActive]}>Wholesale</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
+
+            {showCreditLimitField ? (
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Credit Limit (₹) — optional</Text>
+                <TextInput
+                  style={styles.input}
+                  value={editCreditLimit}
+                  onChangeText={setEditCreditLimit}
+                  keyboardType="numeric"
+                  placeholder="e.g. 50000"
+                />
+              </View>
+            ) : null}
+
+            <TouchableOpacity style={styles.submitBtn} onPress={handleUpdateCustomer} disabled={savingEdit}>
+              {savingEdit ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Save Changes</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* PAYMENT MODAL */}
@@ -522,6 +649,7 @@ const styles = StyleSheet.create({
   customerInfo: { flex: 1 },
   customerName: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary, marginBottom: 4 },
   customerPhone: { fontSize: 13, color: Colors.textSecondary },
+  customerTypeBadge: { fontSize: 11, color: Colors.accentInk, marginTop: 2, fontWeight: '600' },
   customerBalanceContainer: { alignItems: 'flex-end' },
   balanceAmountRed: { fontSize: 16, fontWeight: '700', color: Colors.warn },
   balanceAmountGreen: { fontSize: 16, fontWeight: '700', color: Colors.ok },

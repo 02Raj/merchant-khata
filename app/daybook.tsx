@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { aggregateDaybookSales } from '@/lib/daybookCalc';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
@@ -43,7 +44,7 @@ export default function DayBookScreen() {
       // Fetch Today's Sales
       const { data: sales, error: salesError } = await supabase
         .from('sales')
-        .select('total_amount, payment_type')
+        .select('total_amount, payment_type, cash_amount, upi_amount, credit_amount')
         .eq('business_id', businessInfo.id)
         .gte('created_at', today.toISOString())
         .lt('created_at', tomorrow.toISOString());
@@ -79,17 +80,10 @@ export default function DayBookScreen() {
       }
 
       // Calculate Metrics
-      let cashSales = 0;
-      let upiSales = 0;
-      let creditSales = 0;
-
-      sales?.forEach(s => {
-        const amt = Number(s.total_amount);
-        if (s.payment_type === 'cash') cashSales += amt;
-        else if (s.payment_type === 'upi') upiSales += amt;
-        else if (s.payment_type === 'credit') creditSales += amt;
-        else cashSales += amt; // default to cash if partial or something else
-      });
+      const salesAgg = aggregateDaybookSales(sales || []);
+      let cashSales = salesAgg.cashSales;
+      let upiSales = salesAgg.upiSales;
+      let creditSales = salesAgg.creditSales;
 
       let cashRecovered = 0;
       let upiRecovered = 0;
