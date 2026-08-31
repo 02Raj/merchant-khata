@@ -27,7 +27,7 @@ const queryClient = new QueryClient({
 });
 
 function RootNavigator() {
-  const { isReady, session, hasBusiness } = useAuth();
+  const { isReady, session, hasBusiness, isPlatformAdmin } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
@@ -35,13 +35,22 @@ function RootNavigator() {
   useEffect(() => {
     if (!isReady || !rootNavigationState?.key) return;
 
-    const group = segments[0];
-    const screen = segments[1];
+    const group = segments[0] as string | undefined;
+    const screen = segments[1] as string | undefined;
 
     if (!session) {
-      const onLoginOrOtp = group === '(auth)' && (screen === 'login' || screen === 'otp');
-      if (!onLoginOrOtp) {
+      const onAuthScreen =
+        group === '(auth)' &&
+        (screen === 'login' || screen === 'otp' || screen === 'owner-login');
+      if (!onAuthScreen) {
         router.replace('/(auth)/login');
+      }
+      return;
+    }
+
+    if (isPlatformAdmin) {
+      if (group !== '(admin)') {
+        router.replace('/(admin)' as never);
       }
       return;
     }
@@ -53,10 +62,10 @@ function RootNavigator() {
       return;
     }
 
-    if (group === '(auth)') {
+    if (group === '(auth)' || group === '(admin)') {
       router.replace('/(tabs)/dashboard');
     }
-  }, [hasBusiness, isReady, router, segments, session]);
+  }, [hasBusiness, isPlatformAdmin, isReady, router, segments, session]);
 
   return (
     <>
@@ -68,6 +77,7 @@ function RootNavigator() {
       ) : null}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(admin)" />
         <Stack.Screen name="(tabs)" />
       </Stack>
     </>

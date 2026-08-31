@@ -101,6 +101,14 @@ export default function LoginScreen() {
                 <Text style={styles.buttonText}>Send OTP</Text>
               )}
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.ownerLink}
+              onPress={() => router.push('/(auth)/owner-login' as never)}
+              disabled={loading}
+            >
+              <Text style={styles.ownerLinkText}>Application owner login →</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -211,5 +219,14 @@ const styles = StyleSheet.create({
   errorText: {
     color: Colors.textPrimary,
     fontSize: 13,
+  },
+  ownerLink: {
+    marginTop: 20,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  ownerLinkText: {
+    color: Colors.accentInk,
+    fontSize: 14,
   },
 });

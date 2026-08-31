@@ -1,6 +1,7 @@
 import {
   PhoneAuthProvider,
   signInWithCredential,
+  signInWithEmailAndPassword,
   type ApplicationVerifier,
 } from 'firebase/auth';
 
@@ -21,6 +22,12 @@ export async function sendPhoneOtp(phone: string, verifier: ApplicationVerifier)
   const provider = new PhoneAuthProvider(auth);
   const verificationId = await provider.verifyPhoneNumber(phone, verifier);
   setPendingOtp({ phone, verificationId });
+}
+
+export async function signInOwnerWithEmail(email: string, password: string) {
+  const auth = getFirebaseAuth();
+  const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return { session: result.user };
 }
 
 export async function verifyPhoneOtp(token: string) {

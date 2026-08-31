@@ -14,6 +14,7 @@ import { useDashboardMetrics } from '@/hooks/useQueries';
 export default function DashboardScreen() {
   const router = useRouter();
   const { businessInfo } = useAuth();
+  const isRestaurant = businessInfo?.business_type === 'restaurant';
 
   const { data: metrics, isLoading: loading, refetch } = useDashboardMetrics(businessInfo?.id);
 
@@ -154,16 +155,29 @@ export default function DashboardScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Quick Actions</Text>
               <View style={styles.actionsGrid}>
-                <TouchableOpacity 
-                  style={styles.actionButton}
-                  onPress={() => handleQuickAction('/(tabs)/sales')}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
-                    <Ionicons name="cart" size={24} color={Colors.ok} />
-                  </View>
-                  <Text style={styles.actionText}>New Sale</Text>
-                </TouchableOpacity>
+                {isRestaurant ? (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => handleQuickAction('/(tabs)/tables')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
+                      <Ionicons name="restaurant" size={24} color={Colors.ok} />
+                    </View>
+                    <Text style={styles.actionText}>Tables</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => handleQuickAction('/(tabs)/sales')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
+                      <Ionicons name="cart" size={24} color={Colors.ok} />
+                    </View>
+                    <Text style={styles.actionText}>New Sale</Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity 
                   style={styles.actionButton}

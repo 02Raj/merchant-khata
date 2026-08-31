@@ -11,6 +11,8 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
+import { parseCreditLimitInput, usesCreditLimit } from '@/lib/customerKhata';
+import { openWhatsAppUdhaarReminder } from '@/lib/whatsapp';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
 
@@ -19,7 +21,8 @@ type Customer = {
   name: string;
   phone: string;
   customer_type: 'cash' | 'credit' | 'retail' | 'wholesale';
-  balance: number; // calculated from ledger
+  credit_limit: number | null;
+  balance: number;
 };
 
 type LedgerEntry = {
@@ -42,7 +45,9 @@ export default function CustomersScreen() {
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [formName, setFormName] = useState('');
   const [formPhone, setFormPhone] = useState('');
+  const [formCreditLimit, setFormCreditLimit] = useState('');
   const [savingCustomer, setSavingCustomer] = useState(false);
+  const showCreditLimitField = usesCreditLimit(businessInfo?.business_type);
 
   // Khata / Ledger Modal
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -63,7 +68,7 @@ export default function CustomersScreen() {
     try {
       const { data: customersData, error: custError } = await supabase
         .from('customers')
-        .select('id, name, phone, customer_type')
+        .select('id, name, phone, customer_type, credit_limit')
         .eq('business_id', businessInfo.id)
         .order('name');
 
@@ -87,6 +92,7 @@ export default function CustomersScreen() {
 
       const processedCustomers = customersData.map(c => ({
         ...c,
+        credit_limit: c.credit_limit != null ? Number(c.credit_limit) : null,
         balance: balances[c.id] || 0
       }));
 
@@ -113,6 +119,7 @@ export default function CustomersScreen() {
 
     setSavingCustomer(true);
     try {
+      const creditLimit = showCreditLimitField ? parseCreditLimitInput(formCreditLimit) : null;
       const { error } = await supabase
         .from('customers')
         .insert({
@@ -120,7 +127,8 @@ export default function CustomersScreen() {
           name: formName.trim(),
           phone: formPhone.trim() || 'N/A',
           address: 'N/A',
-          customer_type: businessInfo?.business_type === 'retail' ? 'retail' : 'wholesale'
+          customer_type: businessInfo?.business_type === 'retail' ? 'retail' : 'wholesale',
+          credit_limit: creditLimit,
         });
 
       if (error) throw error;
@@ -129,6 +137,7 @@ export default function CustomersScreen() {
       setAddModalVisible(false);
       setFormName('');
       setFormPhone('');
+      setFormCreditLimit('');
       fetchCustomers();
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -225,7 +234,17 @@ export default function CustomersScreen() {
     }
   };
 
-  const filteredCustomers = customers.filter(c => 
+  const handleWhatsAppReminder = async () => {
+    if (!selectedCustomer || selectedCustomer.balance <= 0) return;
+    await openWhatsAppUdhaarReminder({
+      phone: selectedCustomer.phone,
+      customerName: selectedCustomer.name,
+      balance: selectedCustomer.balance,
+      businessName: businessInfo?.name || 'Your Shop',
+    });
+  };
+
+  const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     c.phone.includes(searchQuery)
   );
@@ -331,6 +350,19 @@ export default function CustomersScreen() {
               <Text style={styles.label}>Phone Number</Text>
               <TextInput style={styles.input} value={formPhone} onChangeText={setFormPhone} keyboardType="phone-pad" placeholder="9876543210" />
             </View>
+
+            {showCreditLimitField ? (
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Credit Limit (₹) — optional</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formCreditLimit}
+                  onChangeText={setFormCreditLimit}
+                  keyboardType="numeric"
+                  placeholder="e.g. 50000"
+                />
+              </View>
+            ) : null}
             
             <TouchableOpacity style={styles.submitBtn} onPress={handleAddCustomer} disabled={savingCustomer}>
               {savingCustomer ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Save Customer</Text>}
@@ -360,6 +392,11 @@ export default function CustomersScreen() {
             <Text style={styles.ledgerBalanceSub}>
               {selectedCustomer?.balance && selectedCustomer.balance > 0 ? 'Customer owes you' : 'Settled'}
             </Text>
+            {showCreditLimitField && selectedCustomer?.credit_limit ? (
+              <Text style={styles.creditLimitHint}>
+                Credit limit: ₹ {selectedCustomer.credit_limit.toLocaleString('en-IN')}
+              </Text>
+            ) : null}
           </View>
 
           {loadingLedger ? (
@@ -399,6 +436,12 @@ export default function CustomersScreen() {
           )}
 
           <View style={styles.ledgerFooter}>
+            {selectedCustomer && selectedCustomer.balance > 0 ? (
+              <TouchableOpacity style={styles.whatsappBtn} onPress={() => void handleWhatsAppReminder()}>
+                <Ionicons name="logo-whatsapp" size={20} color={Colors.bg} />
+                <Text style={styles.whatsappBtnText}>Send Udhaar Reminder</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity style={styles.receivePaymentBtn} onPress={openPaymentModal}>
               <Ionicons name="cash" size={20} color={Colors.bg} />
               <Text style={styles.receivePaymentBtnText}>Receive Payment</Text>
@@ -505,6 +548,7 @@ const styles = StyleSheet.create({
   ledgerBalanceLabel: { fontSize: 14, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1 },
   ledgerBalanceAmount: { fontSize: 40, fontWeight: '700', color: Colors.textPrimary, marginVertical: 8 },
   ledgerBalanceSub: { fontSize: 14, color: Colors.textSecondary },
+  creditLimitHint: { fontSize: 13, color: Colors.accentInk, marginTop: 8 },
   
   ledgerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
   ledgerIconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.surfaceRaised, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
@@ -513,8 +557,10 @@ const styles = StyleSheet.create({
   ledgerDate: { fontSize: 12, color: Colors.textSecondary },
   ledgerAmount: { fontSize: 16, fontWeight: '600' },
   
-  ledgerFooter: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 20, backgroundColor: Colors.bg, borderTopWidth: 1, borderTopColor: Colors.border },
-  receivePaymentBtn: { backgroundColor: Colors.ok, height: 56, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
+  ledgerFooter: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 20, backgroundColor: Colors.bg, borderTopWidth: 1, borderTopColor: Colors.border, gap: 10 },
+  whatsappBtn: { backgroundColor: Colors.ok, height: 52, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
+  whatsappBtnText: { color: Colors.bg, fontSize: 15, fontWeight: '600' },
+  receivePaymentBtn: { backgroundColor: Colors.accent, height: 56, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
   receivePaymentBtnText: { color: Colors.bg, fontSize: 16, fontWeight: '600' },
   
   methodToggle: { flexDirection: 'row', gap: 12 },

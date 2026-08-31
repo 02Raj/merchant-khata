@@ -11,11 +11,14 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { evaluateCreditLimit } from '@/lib/customerKhata';
+
 type Customer = {
   id: string;
   name: string;
   customer_type: 'retail' | 'wholesale';
   balance: number;
+  credit_limit: number | null;
 };
 
 type Product = {
@@ -87,7 +90,7 @@ export default function SalesScreen() {
   const fetchCustomers = async (bizId: string) => {
     const { data: customersData, error } = await supabase
       .from('customers')
-      .select('id, name, customer_type')
+      .select('id, name, customer_type, credit_limit')
       .eq('business_id', bizId)
       .order('name');
       
@@ -120,6 +123,7 @@ export default function SalesScreen() {
 
     const processedCustomers = customersData.map(c => ({
       ...c,
+      credit_limit: c.credit_limit != null ? Number(c.credit_limit) : null,
       balance: balances[c.id] || 0
     }));
 
@@ -373,7 +377,17 @@ export default function SalesScreen() {
     return { grandTotal, taxTotal: pureTax, itemsForRpc };
   }, [cart]);
 
-  const handleCheckout = async () => {
+  const creditLimitStatus = useMemo(() => {
+    return evaluateCreditLimit({
+      businessType: businessInfo?.business_type,
+      currentBalance: selectedCustomer?.balance ?? 0,
+      creditLimit: selectedCustomer?.credit_limit ?? null,
+      billAmount: cartTotals.grandTotal,
+      paymentType,
+    });
+  }, [businessInfo?.business_type, cartTotals.grandTotal, paymentType, selectedCustomer]);
+
+  const runCheckout = async () => {
     if (cart.length === 0) return;
     if (paymentType === 'credit' && !selectedCustomer) {
       setError('You must select a customer for Credit (Udhaar) sales.');
@@ -429,6 +443,28 @@ export default function SalesScreen() {
     } finally {
       setProcessing(false);
     }
+  };
+
+  const handleCheckout = async () => {
+    if (cart.length === 0) return;
+    if (paymentType === 'credit' && !selectedCustomer) {
+      setError('You must select a customer for Credit (Udhaar) sales.');
+      return;
+    }
+
+    if (creditLimitStatus.exceeded) {
+      Alert.alert(
+        'Credit limit exceeded',
+        creditLimitStatus.message ?? 'This bill crosses the customer credit limit.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Bill anyway', style: 'destructive', onPress: () => void runCheckout() },
+        ],
+      );
+      return;
+    }
+
+    await runCheckout();
   };
 
   const shareBillAsPDF = async (saleId: string, snapshot: any) => {
@@ -970,6 +1006,22 @@ export default function SalesScreen() {
               </TouchableOpacity>
             </View>
 
+            {creditLimitStatus.applies && creditLimitStatus.creditLimit ? (
+              <View style={styles.creditLimitInfo}>
+                <Text style={styles.creditLimitInfoText}>
+                  Limit: ₹ {creditLimitStatus.creditLimit.toLocaleString('en-IN')}
+                  {' · '}After bill: ₹ {creditLimitStatus.projectedBalance.toLocaleString('en-IN')}
+                </Text>
+              </View>
+            ) : null}
+
+            {creditLimitStatus.exceeded ? (
+              <View style={styles.creditLimitWarning}>
+                <Ionicons name="warning" size={18} color={Colors.warn} />
+                <Text style={styles.creditLimitWarningText}>{creditLimitStatus.message}</Text>
+              </View>
+            ) : null}
+
             {error && (
               <View style={styles.errorBox}>
                 <Text style={styles.errorText}>{error}</Text>
@@ -1126,5 +1178,33 @@ const styles = StyleSheet.create({
   scanBtnText: {
     color: Colors.accent,
     fontWeight: '600',
-  }
+  },
+  creditLimitInfo: {
+    backgroundColor: Colors.surfaceRaised,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  creditLimitInfoText: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  creditLimitWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(201, 162, 39, 0.15)',
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.warn,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  creditLimitWarningText: {
+    flex: 1,
+    color: Colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
 });
