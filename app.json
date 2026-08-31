@@ -18,6 +18,11 @@
     "android": {
       "package": "com.omnibill.pos",
       "predictiveBackGestureEnabled": false,
+      "softwareKeyboardLayoutMode": "pan",
+      "navigationBar": {
+        "backgroundColor": "#ffffff",
+        "barStyle": "dark-content"
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#1D3D47"

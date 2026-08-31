@@ -1,11 +1,16 @@
+import 'react-native-gesture-handler';
+import 'react-native-reanimated';
+
 import { useEffect } from 'react';
-import { LogBox, Text, View } from 'react-native';
+import { LogBox, Platform, Text, View } from 'react-native';
+import * as NavigationBar from 'expo-navigation-bar';
 
 LogBox.ignoreLogs([
   'Failed to initialize reCAPTCHA Enterprise config',
 ]);
 import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -70,11 +75,19 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    void NavigationBar.setBackgroundColorAsync('#ffffff');
+    void NavigationBar.setButtonStyleAsync('dark');
+  }, []);
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <RootNavigator />
-      </AuthProvider>
-    </QueryClientProvider>
+    <SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
+      </QueryClientProvider>
+    </SafeAreaProvider>
   );
 }

@@ -7,7 +7,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "debug:android": "powershell -ExecutionPolicy Bypass -File scripts/debug-android.ps1"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -21,6 +22,7 @@
     "expo-font": "~14.0.12",
     "expo-haptics": "~15.0.8",
     "expo-linking": "~8.0.12",
+    "expo-navigation-bar": "~5.0.10",
     "expo-print": "~15.0.8",
     "expo-router": "~6.0.24",
     "expo-sharing": "~14.0.8",

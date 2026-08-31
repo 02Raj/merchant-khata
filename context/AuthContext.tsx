@@ -33,6 +33,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const firebaseAuth = getFirebaseAuth();
+      if (typeof firebaseAuth.onAuthStateChanged !== 'function') {
+        throw new Error('Firebase Auth did not initialize');
+      }
 
       unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
         let bizInfo: BusinessInfo | null = null;
