@@ -59,6 +59,11 @@ export default function DashboardScreen() {
       if (error) {
         if (error.code === '42P01') {
           Alert.alert('Database Error', 'Expenses table not found. Please run the SQL migration first!');
+        } else if (error.code === '42501') {
+          Alert.alert(
+            'Permission Error',
+            'Cannot save expense. Ask the app owner to run the latest Supabase migration (expenses_grants_and_rls).',
+          );
         } else {
           throw error;
         }
@@ -68,9 +73,10 @@ export default function DashboardScreen() {
         setExpenseAmount('');
         refetch();
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      Alert.alert('Error', 'Failed to save expense');
+      const message = err?.message || 'Failed to save expense';
+      Alert.alert('Error', message);
     } finally {
       setSavingExpense(false);
     }

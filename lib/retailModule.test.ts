@@ -362,6 +362,18 @@ describe('Retail Module — Bug fixes DB migration smoke tests', () => {
     const source = readProjectFile('app/(tabs)/sales.tsx');
     expect(source).not.toMatch(/paymentType === 'card'/);
   });
+
+  it('B23 — expenses GRANT + Firebase RLS migration', () => {
+    const sql = readProjectFile('supabase/migrations/20260831250000_expenses_grants_and_rls.sql');
+    expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.expenses');
+    expect(sql).toContain('user_belongs_to_business');
+  });
+
+  it('B23 — dashboard add expense wired', () => {
+    const source = readProjectFile('app/(tabs)/dashboard.tsx');
+    expect(source).toContain("from('expenses')");
+    expect(source).toContain('handleAddExpense');
+  });
 });
 
 describe('Retail Module — sales history payment split legacy rows', () => {
