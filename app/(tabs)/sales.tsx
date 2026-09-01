@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import * as Haptics from 'expo-haptics';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { safePrintAsync } from '@/lib/safePrint';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { evaluateCreditLimit, parseCreditLimitInput, showCustomerCreditLimitField } from '@/lib/customerKhata';
 import {
@@ -687,7 +688,7 @@ export default function SalesScreen() {
         gstin: businessInfo?.gstin,
         businessType: businessInfo?.business_type,
       }, paperSize);
-      await Print.printAsync({ html });
+      await safePrintAsync({ html });
     } catch (error) {
       console.error(error);
       Alert.alert('Error', 'Failed to print thermal receipt');

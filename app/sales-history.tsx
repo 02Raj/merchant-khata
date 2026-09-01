@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { safePrintAsync } from '@/lib/safePrint';
 
 import { useAuth } from '@/context/AuthContext';
 import { Colors } from '@/lib/theme';
@@ -193,7 +194,7 @@ export default function SalesHistoryScreen() {
           gstin: businessInfo?.gstin,
           businessType: businessInfo?.business_type,
         }, paperSize);
-        await Print.printAsync({ html });
+        await safePrintAsync({ html });
       } else {
         const html = buildRetailPdfHtml(snapshot, {
           name: businessInfo?.name,

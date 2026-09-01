@@ -11,7 +11,19 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { Colors } from '@/lib/theme';
 import { useInventory } from '@/hooks/useQueries';
-import { useAddStock } from '@/hooks/useMutations';
+import {
+  useAddRawMaterialStock,
+  useAddStock,
+  useCreateRawMaterial,
+  useDeleteRawMaterial,
+  useUpdateRawMaterial,
+} from '@/hooks/useMutations';
+import {
+  normalizeRawMaterialUnit,
+  parseOpeningStock,
+  RAW_MATERIAL_UNITS,
+  validateRawMaterialName,
+} from '@/lib/restaurantHelpers';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
 import * as Linking from 'expo-linking';
@@ -55,6 +67,10 @@ export default function InventoryScreen() {
   const rawMaterials = inventoryData?.rawMaterials || [];
 
   const addStockMutation = useAddStock();
+  const createRawMaterialMutation = useCreateRawMaterial();
+  const updateRawMaterialMutation = useUpdateRawMaterial();
+  const addRawMaterialStockMutation = useAddRawMaterialStock();
+  const deleteRawMaterialMutation = useDeleteRawMaterial();
 
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -72,6 +88,17 @@ export default function InventoryScreen() {
   const [itemsToShare, setItemsToShare] = useState<ProductInventory[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [fetchingSuppliers, setFetchingSuppliers] = useState(false);
+
+  // Raw material modals (restaurant)
+  const [rawMaterialModalVisible, setRawMaterialModalVisible] = useState(false);
+  const [editingRawMaterial, setEditingRawMaterial] = useState<RawMaterial | null>(null);
+  const [rmName, setRmName] = useState('');
+  const [rmUnit, setRmUnit] = useState<(typeof RAW_MATERIAL_UNITS)[number]>('g');
+  const [rmOpeningStock, setRmOpeningStock] = useState('');
+
+  const [rawStockModalVisible, setRawStockModalVisible] = useState(false);
+  const [selectedRawMaterial, setSelectedRawMaterial] = useState<RawMaterial | null>(null);
+  const [rawAddQty, setRawAddQty] = useState('');
 
   const fetchSuppliersForShare = async () => {
     if (!businessInfo?.id) return;
@@ -229,6 +256,120 @@ export default function InventoryScreen() {
     setStockModalVisible(true);
   };
 
+  const openAddRawMaterialModal = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEditingRawMaterial(null);
+    setRmName('');
+    setRmUnit('g');
+    setRmOpeningStock('');
+    setRawMaterialModalVisible(true);
+  };
+
+  const openEditRawMaterialModal = (material: RawMaterial) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEditingRawMaterial(material);
+    setRmName(material.name);
+    setRmUnit(normalizeRawMaterialUnit(material.unit));
+    setRmOpeningStock('');
+    setRawMaterialModalVisible(true);
+  };
+
+  const openRawStockModal = (material: RawMaterial) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedRawMaterial(material);
+    setRawAddQty('');
+    setRawStockModalVisible(true);
+  };
+
+  const handleSaveRawMaterial = async () => {
+    const nameError = validateRawMaterialName(rmName);
+    if (nameError) {
+      Alert.alert('Error', nameError);
+      return;
+    }
+    if (!businessInfo?.id) return;
+
+    const stockResult = parseOpeningStock(rmOpeningStock);
+    if (!stockResult.ok) {
+      Alert.alert('Error', stockResult.message);
+      return;
+    }
+
+    try {
+      if (editingRawMaterial) {
+        await updateRawMaterialMutation.mutateAsync({
+          businessId: businessInfo.id,
+          id: editingRawMaterial.id,
+          name: rmName,
+          unit: rmUnit,
+        });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setRawMaterialModalVisible(false);
+        return;
+      }
+
+      await createRawMaterialMutation.mutateAsync({
+        businessId: businessInfo.id,
+        name: rmName,
+        unit: rmUnit,
+        stockQuantity: stockResult.value,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setRawMaterialModalVisible(false);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to save raw material');
+    }
+  };
+
+  const handleAddRawMaterialStock = async () => {
+    const qty = parseFloat(rawAddQty);
+    if (Number.isNaN(qty) || qty <= 0) {
+      Alert.alert('Error', 'Please enter a valid positive quantity');
+      return;
+    }
+    if (!selectedRawMaterial || !businessInfo?.id) return;
+
+    try {
+      await addRawMaterialStockMutation.mutateAsync({
+        businessId: businessInfo.id,
+        id: selectedRawMaterial.id,
+        currentStock: Number(selectedRawMaterial.stock_quantity),
+        addQuantity: qty,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setRawStockModalVisible(false);
+      setRawAddQty('');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to add stock');
+    }
+  };
+
+  const handleDeleteRawMaterial = (material: RawMaterial) => {
+    Alert.alert(
+      'Delete Raw Material',
+      `Delete "${material.name}"? Linked recipes will also be removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!businessInfo?.id) return;
+            try {
+              await deleteRawMaterialMutation.mutateAsync({
+                businessId: businessInfo.id,
+                id: material.id,
+              });
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to delete raw material');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   // Derived state
   const totalValue = useMemo(() => {
     return products.reduce((sum, p) => sum + (Math.max(0, p.stockCount) * p.purchase_price), 0);
@@ -316,7 +457,7 @@ export default function InventoryScreen() {
         <Ionicons name="search" size={20} color={Colors.textSecondary} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search items or categories..."
+          placeholder={activeTab === 'raw_materials' ? 'Search raw materials...' : 'Search items or categories...'}
           placeholderTextColor={Colors.textSecondary}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -344,18 +485,32 @@ export default function InventoryScreen() {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="cube-outline" size={64} color={Colors.textSecondary} />
-              <Text style={styles.emptyText}>No Raw Materials Found.</Text>
+              <Text style={styles.emptyText}>No raw materials yet.</Text>
+              <Text style={styles.emptyHint}>Add paneer, butter, masala and other kitchen ingredients.</Text>
+              <TouchableOpacity style={styles.emptyAddBtn} onPress={openAddRawMaterialModal}>
+                <Ionicons name="add" size={20} color={Colors.bg} />
+                <Text style={styles.emptyAddBtnText}>Add Raw Material</Text>
+              </TouchableOpacity>
             </View>
           }
           renderItem={({ item }) => (
             <View style={styles.itemCard}>
-              <View style={styles.itemInfo}>
+              <TouchableOpacity style={styles.itemInfo} onPress={() => openEditRawMaterialModal(item)}>
                 <Text style={styles.itemName}>{item.name}</Text>
                 <View style={styles.stockRow}>
                   <Text style={styles.stockValue}>
                     Stock: {item.stock_quantity} {item.unit}
                   </Text>
                 </View>
+              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity style={styles.addStockBtn} onPress={() => openRawStockModal(item)}>
+                  <Ionicons name="add" size={20} color={Colors.accent} />
+                  <Text style={styles.addStockBtnText}>Stock</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.deleteRmBtn} onPress={() => handleDeleteRawMaterial(item)}>
+                  <Ionicons name="trash-outline" size={18} color={Colors.warn} />
+                </TouchableOpacity>
               </View>
             </View>
           )}
@@ -491,6 +646,125 @@ export default function InventoryScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* RAW MATERIAL ADD / EDIT MODAL */}
+      <Modal visible={rawMaterialModalVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {editingRawMaterial ? 'Edit Raw Material' : 'Add Raw Material'}
+              </Text>
+              <TouchableOpacity onPress={() => setRawMaterialModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalHint}>
+              Kitchen ingredients used in recipes (paneer, butter, oil, masala, etc.)
+            </Text>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Material Name *</Text>
+              <TextInput
+                style={styles.input}
+                value={rmName}
+                onChangeText={setRmName}
+                placeholder="e.g. Paneer, Butter, Tomato Puree"
+                placeholderTextColor={Colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Unit *</Text>
+              <View style={styles.unitChipRow}>
+                {RAW_MATERIAL_UNITS.map((unit) => (
+                  <TouchableOpacity
+                    key={unit}
+                    style={[styles.unitChip, rmUnit === unit && styles.unitChipActive]}
+                    onPress={() => setRmUnit(unit)}
+                  >
+                    <Text style={[styles.unitChipText, rmUnit === unit && styles.unitChipTextActive]}>{unit}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {!editingRawMaterial ? (
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Opening Stock (optional)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={rmOpeningStock}
+                  onChangeText={setRmOpeningStock}
+                  keyboardType="decimal-pad"
+                  placeholder={`0 ${rmUnit}`}
+                  placeholderTextColor={Colors.textSecondary}
+                />
+              </View>
+            ) : null}
+
+            <TouchableOpacity
+              style={styles.submitBtn}
+              onPress={handleSaveRawMaterial}
+              disabled={createRawMaterialMutation.isPending || updateRawMaterialMutation.isPending}
+            >
+              {createRawMaterialMutation.isPending || updateRawMaterialMutation.isPending ? (
+                <ActivityIndicator color={Colors.bg} />
+              ) : (
+                <Text style={styles.submitBtnText}>
+                  {editingRawMaterial ? 'Save Changes' : 'Add Raw Material'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* RAW MATERIAL STOCK MODAL */}
+      <Modal visible={rawStockModalVisible} animationType="fade" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Stock</Text>
+              <TouchableOpacity onPress={() => setRawStockModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.stockContext}>
+              <Text style={styles.contextName}>{selectedRawMaterial?.name}</Text>
+              <Text style={styles.contextCurrent}>
+                Current: {selectedRawMaterial?.stock_quantity} {selectedRawMaterial?.unit}
+              </Text>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Quantity to Add ({selectedRawMaterial?.unit})</Text>
+              <TextInput
+                style={styles.input}
+                value={rawAddQty}
+                onChangeText={setRawAddQty}
+                keyboardType="decimal-pad"
+                placeholder="0"
+                placeholderTextColor={Colors.textSecondary}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.submitBtn}
+              onPress={handleAddRawMaterialStock}
+              disabled={addRawMaterialStockMutation.isPending}
+            >
+              {addRawMaterialStockMutation.isPending ? (
+                <ActivityIndicator color={Colors.bg} />
+              ) : (
+                <Text style={styles.submitBtnText}>Add Stock</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* SHARE LOW STOCK MODAL */}
       <Modal visible={supplierModalVisible} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
@@ -552,6 +826,13 @@ export default function InventoryScreen() {
       </Modal>
 
       {/* FLOATING ACTION BUTTON */}
+      {activeTab === 'raw_materials' && isRestaurant && (
+        <TouchableOpacity style={styles.fab} onPress={openAddRawMaterialModal}>
+          <Ionicons name="add" size={24} color={Colors.bg} />
+          <Text style={styles.fabText}>Add Material</Text>
+        </TouchableOpacity>
+      )}
+
       {activeTab === 'low_stock' && lowStockCount > 0 && (
         <TouchableOpacity 
           style={styles.fab}
@@ -592,8 +873,42 @@ const styles = StyleSheet.create({
   
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { paddingHorizontal: 20, paddingBottom: 40 },
-  emptyContainer: { alignItems: 'center', marginTop: 60 },
-  emptyText: { color: Colors.textSecondary, marginTop: 12, fontSize: 16 },
+  emptyContainer: { alignItems: 'center', marginTop: 60, paddingHorizontal: 24 },
+  emptyText: { color: Colors.textSecondary, marginTop: 12, fontSize: 16, fontWeight: '600' },
+  emptyHint: { color: Colors.textSecondary, marginTop: 8, fontSize: 14, textAlign: 'center' },
+  emptyAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.accent,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 20,
+  },
+  emptyAddBtnText: { color: Colors.bg, fontWeight: '700', fontSize: 15 },
+  modalHint: { color: Colors.textSecondary, fontSize: 14, marginBottom: 20 },
+  unitChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  unitChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  unitChipActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  unitChipText: { color: Colors.textPrimary, fontSize: 14, fontWeight: '500' },
+  unitChipTextActive: { color: Colors.bg, fontWeight: '700' },
+  deleteRmBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   
   itemCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface, padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: Colors.border },
   itemCardLow: { borderColor: 'rgba(239, 68, 68, 0.3)' },

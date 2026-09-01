@@ -386,6 +386,9 @@ export default function ProductsScreen() {
         alternate_unit: altUnit,
         conversion_factor: convFactor,
         is_active: formIsActive,
+        ...(businessInfo?.business_type === 'restaurant'
+          ? { track_stock: false, is_available_today: true }
+          : {}),
       };
 
       if (editingId) {

@@ -339,6 +339,13 @@ describe('Hybrid Bug List — fixes verified', () => {
     expect(sql).toContain('GROUP BY');
   });
 
+  it('B-H7 P0 — process_checkout item alias not ambiguous', () => {
+    const sql = read('supabase/migrations/20260831230000_process_checkout_item_ambiguous_fix.sql');
+    expect(sql).toContain('cart_line');
+    expect(sql).toContain('cart_item jsonb');
+    expect(sql).not.toMatch(/FROM jsonb_array_elements\(p_items\) item/);
+  });
+
   it('B-H6 P1 — is_wholesale_rate persisted per line', () => {
     const sql = read('supabase/migrations/20260831190000_wholesale_fixes.sql');
     expect(sql).toContain('is_wholesale_rate');

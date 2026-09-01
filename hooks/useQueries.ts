@@ -175,9 +175,8 @@ export function useInventory(businessId?: string, isRestaurant: boolean = false)
           .select('*')
           .eq('business_id', businessId)
           .order('name');
-        if (!rmError && rmData) {
-          rawMaterials = rmData;
-        }
+        if (rmError) throw rmError;
+        rawMaterials = rmData ?? [];
       }
 
       return { products, rawMaterials };

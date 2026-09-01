@@ -2,7 +2,7 @@ import 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { useEffect } from 'react';
-import { LogBox, Platform, Text, View } from 'react-native';
+import { ActivityIndicator, LogBox, Platform, StyleSheet, View } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
 
 LogBox.ignoreLogs([
@@ -14,6 +14,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Colors } from '@/lib/theme';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -70,21 +71,39 @@ function RootNavigator() {
     }
   }, [businessInfo, hasBusiness, isReady, router, segments, session]);
 
+  if (!isReady) {
+    return (
+      <View style={styles.bootScreen}>
+        <ActivityIndicator size="large" color={Colors.accent} />
+      </View>
+    );
+  }
+
   return (
     <>
       <StatusBar style="auto" />
-      {!isReady ? (
-        <View>
-          <Text>Loading</Text>
-        </View>
-      ) : null}
       <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="kot/[id]" />
+        <Stack.Screen name="daybook" />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="sales-history" />
+        <Stack.Screen name="products/[id]" />
       </Stack>
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  bootScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.bg,
+  },
+});
 
 export default function RootLayout() {
   useEffect(() => {

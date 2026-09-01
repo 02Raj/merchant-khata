@@ -285,19 +285,25 @@ export default function ProductDetailScreen() {
 
             <View style={styles.formGroup}>
               <Text style={styles.label}>Select Raw Material</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                {rawMaterials.map(rm => (
-                  <TouchableOpacity 
-                    key={rm.id} 
-                    style={[styles.chip, selectedRawMaterial === rm.id && styles.chipSelected]}
-                    onPress={() => setSelectedRawMaterial(rm.id)}
-                  >
-                    <Text style={[styles.chipText, selectedRawMaterial === rm.id && styles.chipTextSelected]}>
-                      {rm.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              {rawMaterials.length === 0 ? (
+                <Text style={styles.desc}>
+                  No raw materials yet. Go to Inventory → Raw Materials tab → Add Material (paneer, butter, etc.)
+                </Text>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                  {rawMaterials.map(rm => (
+                    <TouchableOpacity 
+                      key={rm.id} 
+                      style={[styles.chip, selectedRawMaterial === rm.id && styles.chipSelected]}
+                      onPress={() => setSelectedRawMaterial(rm.id)}
+                    >
+                      <Text style={[styles.chipText, selectedRawMaterial === rm.id && styles.chipTextSelected]}>
+                        {rm.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
             </View>
 
             <View style={styles.formGroup}>

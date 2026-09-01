@@ -7,9 +7,9 @@ import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
 import * as Haptics from 'expo-haptics';
-import * as Print from 'expo-print';
 import { generateReceiptHTML, generateKOTHTML } from '@/lib/printTemplate';
 import { getPrinterPaperSize } from '@/lib/printerSettings';
+import { safePrintAsync } from '@/lib/safePrint';
 
 // Types
 type Product = {
@@ -128,7 +128,7 @@ export default function KOTScreen() {
     try {
       // Fetch Menu
       const [pRes, vRes, mRes] = await Promise.all([
-        supabase.from('products').select('id, name, sale_price, gst_rate, tax_inclusive, is_available_today').eq('business_id', businessInfo.id),
+        supabase.from('products').select('id, name, sale_price, gst_rate, tax_inclusive, is_available_today').eq('business_id', businessInfo.id).eq('is_active', true),
         supabase.from('product_variants').select('*'), // Filtered via RLS
         supabase.from('modifiers').select('*') // Filtered via RLS
       ]);
@@ -324,9 +324,9 @@ export default function KOTScreen() {
           kot_count: newKotCount,
         };
         const html = generateKOTHTML(orderDataToPrint, pendingItems, displayTableName, paperSize);
-        await Print.printAsync({ html });
+        await safePrintAsync({ html });
       } catch (printErr) {
-        console.error("KOT Print Failed", printErr);
+        console.error('KOT Print Failed', printErr);
       }
 
       setItems(updatedItems);
@@ -342,8 +342,6 @@ export default function KOTScreen() {
           });
       Alert.alert('Success', `KOT #${newKotCount} Sent to Kitchen!`);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      
-      router.back();
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -519,18 +517,22 @@ export default function KOTScreen() {
       Alert.alert('Billed', `Bill generated. Invoice #${nextInv}`);
       setOrder(billedOrder);
       
-      // Auto-print bill
-      const paperSize = await getPrinterPaperSize();
-      const billableItems = items.filter((item) => item.status !== 'cancelled');
-      const html = generateReceiptHTML(
-        businessInfo!,
-        { ...billedOrder, type: effectiveOrderType },
-        billableItems,
-        billableGrandTotal,
-        displayTableName,
-        paperSize,
-      );
-      await Print.printAsync({ html });
+      // Auto-print bill (cancel is OK — bill is already saved)
+      try {
+        const paperSize = await getPrinterPaperSize();
+        const billableItems = items.filter((item) => item.status !== 'cancelled');
+        const html = generateReceiptHTML(
+          businessInfo!,
+          { ...billedOrder, type: effectiveOrderType },
+          billableItems,
+          billableGrandTotal,
+          displayTableName,
+          paperSize,
+        );
+        await safePrintAsync({ html });
+      } catch (printErr: any) {
+        Alert.alert('Bill Saved', `Invoice #${nextInv} saved. Print failed: ${printErr.message}`);
+      }
       
     } catch(e:any) {
       Alert.alert('Error', e.message);
@@ -574,8 +576,9 @@ export default function KOTScreen() {
         displayTableName,
         paperSize,
       );
-      await Print.printAsync({ html });
-    } catch (e:any) {
+      const result = await safePrintAsync({ html });
+      if (result === 'cancelled') return;
+    } catch (e: any) {
       Alert.alert('Print Error', e.message);
     }
   };
@@ -602,7 +605,8 @@ export default function KOTScreen() {
         displayTableName,
         paperSize,
       );
-      await Print.printAsync({ html });
+      const result = await safePrintAsync({ html });
+      if (result === 'cancelled') return;
     } catch (e: any) {
       Alert.alert('Print Error', e.message);
     }
@@ -804,18 +808,18 @@ export default function KOTScreen() {
             )}
 
             {role !== 'waiter' && (order?.status === 'billed' || order?.status === 'paid') && (
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={handleReprint}>
-                  <Text style={styles.secondaryBtnText}>Reprint Bill</Text>
+              <View style={styles.secondaryActions}>
+                <TouchableOpacity style={styles.secondaryBtnHalf} onPress={handleReprint}>
+                  <Text style={styles.secondaryBtnText} numberOfLines={1}>Reprint Bill</Text>
                 </TouchableOpacity>
                 {(order?.kot_count || 0) > 0 && (
-                  <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={handleReprintKOT}>
-                    <Text style={styles.secondaryBtnText}>Reprint KOT</Text>
+                  <TouchableOpacity style={styles.secondaryBtnHalf} onPress={handleReprintKOT}>
+                    <Text style={styles.secondaryBtnText} numberOfLines={1}>Reprint KOT</Text>
                   </TouchableOpacity>
                 )}
                 {order?.status === 'billed' && (
-                  <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={handleReopenBill}>
-                    <Text style={styles.secondaryBtnText}>Re-open</Text>
+                  <TouchableOpacity style={styles.secondaryBtnFull} onPress={handleReopenBill}>
+                    <Text style={styles.secondaryBtnText}>Re-open Bill</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -1005,8 +1009,29 @@ const styles = StyleSheet.create({
   sendKotBtn: { backgroundColor: Colors.warn, padding: 16, borderRadius: 8, alignItems: 'center' },
   billBtn: { backgroundColor: Colors.accent, padding: 16, borderRadius: 8, alignItems: 'center' },
   payBtn: { backgroundColor: Colors.ok, padding: 16, borderRadius: 8, alignItems: 'center' },
+  secondaryActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  secondaryBtnHalf: {
+    width: '48%',
+    backgroundColor: Colors.surface,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  secondaryBtnFull: {
+    width: '100%',
+    backgroundColor: Colors.surface,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
   secondaryBtn: { backgroundColor: Colors.surface, padding: 16, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: Colors.border },
-  secondaryBtnText: { color: Colors.textPrimary, fontWeight: 'bold', fontSize: 16 },
+  secondaryBtnText: { color: Colors.textPrimary, fontWeight: 'bold', fontSize: 13, textAlign: 'center' },
   btnDisabled: { opacity: 0.5 },
   btnText: { color: Colors.bg, fontWeight: 'bold', fontSize: 16 },
   cancelRequestBox: { marginTop: 8, padding: 8, backgroundColor: '#ffe6e6', borderRadius: 8, borderWidth: 1, borderColor: Colors.warn },
