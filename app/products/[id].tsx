@@ -1,6 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -16,6 +29,7 @@ export default function ProductDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const { businessInfo } = useAuth();
+  const insets = useSafeAreaInsets();
   
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<any>(null);
@@ -261,68 +275,107 @@ export default function ProductDetailScreen() {
       </ScrollView>
 
       {/* Recipe (BOM) Modal */}
-      {recipeModalVisible && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.rowBetween}>
-              <Text style={styles.modalTitle}>Recipe for {selectedVariant?.name}</Text>
-              <TouchableOpacity onPress={() => setRecipeModalVisible(false)}>
-                <Ionicons name="close" size={24} color={Colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.desc}>Add raw materials required to make 1 unit of this size.</Text>
-            
-            <ScrollView style={{ maxHeight: 200, marginBottom: 16 }}>
-              {recipes.filter(r => r.product_variant_id === selectedVariant?.id).map(r => (
-                <View key={r.id} style={styles.listItem}>
-                  <Text style={styles.itemTitle}>{r.raw_material?.name} ({r.quantity_required} {r.raw_material?.unit})</Text>
-                  <TouchableOpacity onPress={() => deleteRecipe(r.id)}>
-                    <Ionicons name="trash" size={18} color={Colors.warn} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </ScrollView>
+      <Modal
+        visible={recipeModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setRecipeModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={() => setRecipeModalVisible(false)} />
+          <View
+            style={[
+              styles.modalContent,
+              { paddingBottom: Math.max(insets.bottom, 20) },
+            ]}
+          >
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              bounces={false}
+            >
+              <View style={styles.rowBetween}>
+                <Text style={styles.modalTitle}>Recipe for {selectedVariant?.name}</Text>
+                <TouchableOpacity onPress={() => setRecipeModalVisible(false)}>
+                  <Ionicons name="close" size={24} color={Colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalDesc}>
+                Add raw materials required to make 1 unit of this size.
+              </Text>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Select Raw Material</Text>
-              {rawMaterials.length === 0 ? (
-                <Text style={styles.desc}>
-                  No raw materials yet. Go to Inventory → Raw Materials tab → Add Material (paneer, butter, etc.)
-                </Text>
-              ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                  {rawMaterials.map(rm => (
-                    <TouchableOpacity 
-                      key={rm.id} 
-                      style={[styles.chip, selectedRawMaterial === rm.id && styles.chipSelected]}
-                      onPress={() => setSelectedRawMaterial(rm.id)}
-                    >
-                      <Text style={[styles.chipText, selectedRawMaterial === rm.id && styles.chipTextSelected]}>
-                        {rm.name}
-                      </Text>
+              {recipes
+                .filter((r) => r.product_variant_id === selectedVariant?.id)
+                .map((r) => (
+                  <View key={r.id} style={styles.listItem}>
+                    <Text style={styles.itemTitle}>
+                      {r.raw_material?.name} ({r.quantity_required} {r.raw_material?.unit})
+                    </Text>
+                    <TouchableOpacity onPress={() => deleteRecipe(r.id)}>
+                      <Ionicons name="trash" size={18} color={Colors.warn} />
                     </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              )}
-            </View>
+                  </View>
+                ))}
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Quantity Required (in {rawMaterials.find(r => r.id === selectedRawMaterial)?.unit || 'unit'})</Text>
-              <TextInput 
-                style={styles.input} 
-                keyboardType="numeric" 
-                value={recipeQty} 
-                onChangeText={setRecipeQty}
-                placeholder="e.g. 150"
-              />
-            </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Select Raw Material</Text>
+                {rawMaterials.length === 0 ? (
+                  <Text style={styles.modalHint}>
+                    No raw materials yet. Go to Inventory → Raw Materials tab → Add Material
+                    (paneer, butter, etc.)
+                  </Text>
+                ) : (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.chipScroll}
+                    contentContainerStyle={styles.chipScrollContent}
+                  >
+                    {rawMaterials.map((rm) => (
+                      <TouchableOpacity
+                        key={rm.id}
+                        style={[styles.chip, selectedRawMaterial === rm.id && styles.chipSelected]}
+                        onPress={() => setSelectedRawMaterial(rm.id)}
+                      >
+                        <Text
+                          style={[
+                            styles.chipText,
+                            selectedRawMaterial === rm.id && styles.chipTextSelected,
+                          ]}
+                        >
+                          {rm.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+              </View>
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={addRecipe}>
-              <Text style={styles.primaryBtnText}>Add to Recipe</Text>
-            </TouchableOpacity>
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>
+                  Quantity Required (in{' '}
+                  {rawMaterials.find((r) => r.id === selectedRawMaterial)?.unit || 'unit'})
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={recipeQty}
+                  onChangeText={setRecipeQty}
+                  placeholder="e.g. 150"
+                  placeholderTextColor={Colors.textSecondary}
+                />
+              </View>
+
+              <TouchableOpacity style={styles.primaryBtn} onPress={addRecipe}>
+                <Text style={styles.primaryBtnText}>Add to Recipe</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-        </View>
-      )}
+        </KeyboardAvoidingView>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -350,9 +403,21 @@ const styles = StyleSheet.create({
   addBtn: { backgroundColor: Colors.accent, width: 44, height: 44, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
   recipeBtn: { backgroundColor: Colors.textSecondary, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, gap: 4 },
   recipeBtnText: { color: Colors.bg, fontSize: 12, fontWeight: 'bold' },
-  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: Colors.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, minHeight: 400 },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalContent: {
+    backgroundColor: Colors.bg,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    maxHeight: '88%',
+  },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: Colors.textPrimary },
+  modalDesc: { color: Colors.textSecondary, fontSize: 13, marginBottom: 16, marginTop: 8 },
+  modalHint: { color: Colors.textSecondary, fontSize: 13, lineHeight: 20 },
+  chipScroll: { marginBottom: 4 },
+  chipScrollContent: { paddingRight: 8 },
   label: { fontSize: 14, fontWeight: 'bold', color: Colors.textPrimary, marginBottom: 8 },
   formGroup: { marginBottom: 16 },
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, marginRight: 8 },

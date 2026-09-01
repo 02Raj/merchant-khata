@@ -406,7 +406,11 @@ export default function SuppliersScreen() {
 
       {/* ADD SUPPLIER MODAL */}
       <Modal visible={addModalVisible} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add New Supplier</Text>
@@ -414,25 +418,44 @@ export default function SuppliersScreen() {
                 <Ionicons name="close" size={24} color={Colors.textPrimary} />
               </TouchableOpacity>
             </View>
-            
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Supplier Name *</Text>
-              <TextInput style={styles.input} value={formName} onChangeText={setFormName} placeholder="Distributor Name" />
-            </View>
-            
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Phone Number</Text>
-              <TextInput style={styles.input} value={formPhone} onChangeText={setFormPhone} keyboardType="phone-pad" placeholder="9876543210" />
-            </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Address</Text>
-              <TextInput style={styles.input} value={formAddress} onChangeText={setFormAddress} placeholder="Godown, city" />
-            </View>
-            
-            <TouchableOpacity style={styles.submitBtn} onPress={handleAddSupplier} disabled={savingSupplier}>
-              {savingSupplier ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Save Supplier</Text>}
-            </TouchableOpacity>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalScrollContent}
+            >
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Supplier Name *</Text>
+                <TextInput style={styles.input} value={formName} onChangeText={setFormName} placeholder="Distributor Name" />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Phone Number</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formPhone}
+                  onChangeText={setFormPhone}
+                  keyboardType="phone-pad"
+                  placeholder="9876543210"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Address</Text>
+                <TextInput
+                  style={[styles.input, styles.inputMultiline]}
+                  value={formAddress}
+                  onChangeText={setFormAddress}
+                  placeholder="Godown, city"
+                  multiline
+                  textAlignVertical="top"
+                />
+              </View>
+
+              <TouchableOpacity style={styles.submitBtn} onPress={handleAddSupplier} disabled={savingSupplier}>
+                {savingSupplier ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Save Supplier</Text>}
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -511,7 +534,11 @@ export default function SuppliersScreen() {
 
       {/* ADD PURCHASE MODAL */}
       <Modal visible={purchaseModalVisible} animationType="fade" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add Purchase Bill</Text>
@@ -519,7 +546,12 @@ export default function SuppliersScreen() {
                 <Ionicons name="close" size={24} color={Colors.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalScrollContent}
+            >
             <View style={styles.formGroup}>
               <Text style={styles.label}>Bill Total Amount (₹)</Text>
               <TextInput 
@@ -570,13 +602,18 @@ export default function SuppliersScreen() {
             <TouchableOpacity style={[styles.submitBtn, { backgroundColor: Colors.warn }]} onPress={handleAddPurchase} disabled={processingPurchase}>
               {processingPurchase ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Confirm Purchase</Text>}
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
       {/* PAYMENT OUT MODAL */}
       <Modal visible={paymentModalVisible} animationType="fade" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Payment Out</Text>
@@ -584,7 +621,12 @@ export default function SuppliersScreen() {
                 <Ionicons name="close" size={24} color={Colors.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalScrollContent}
+            >
             <View style={styles.formGroup}>
               <Text style={styles.label}>Amount Paid (₹)</Text>
               <TextInput 
@@ -616,6 +658,7 @@ export default function SuppliersScreen() {
             <TouchableOpacity style={styles.submitBtn} onPress={handlePaySupplier} disabled={processingPayment}>
               {processingPayment ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitBtnText}>Confirm Payment</Text>}
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -653,13 +696,15 @@ const styles = StyleSheet.create({
   balanceLabel: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: Colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
+  modalContent: { backgroundColor: Colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' },
+  modalScrollContent: { paddingBottom: Platform.OS === 'android' ? 32 : 16 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   modalTitle: { fontSize: 20, fontWeight: '700', color: Colors.textPrimary },
   
   formGroup: { marginBottom: 20 },
   label: { fontSize: 13, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   input: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, paddingHorizontal: 16, height: 52, color: Colors.textPrimary, fontSize: 16 },
+  inputMultiline: { height: 88, paddingTop: 14, paddingBottom: 14 },
   
   submitBtn: { backgroundColor: Colors.accent, height: 56, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
   submitBtnText: { color: Colors.bg, fontSize: 16, fontWeight: '600' },
