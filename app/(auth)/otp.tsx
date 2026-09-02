@@ -42,6 +42,13 @@ export default function OtpScreen() {
     return () => clearTimeout(id);
   }, [cooldown]);
 
+  // Auto-submit OTP when 6 digits are entered (autofilled or typed)
+  useEffect(() => {
+    if (token.length === 6 && !loading) {
+      onVerify();
+    }
+  }, [token]);
+
   const onVerify = async () => {
     if (!phone) return;
     setError(null);
