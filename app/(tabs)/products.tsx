@@ -591,6 +591,19 @@ export default function ProductsScreen() {
         />
       )}
 
+      {businessInfo?.business_type === 'restaurant' && (
+        <TouchableOpacity
+          style={styles.fabQuickSale}
+          onPress={() => {
+            import('expo-router').then(({ router }) => router.push('/kot/new?type=takeaway'));
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="cart" size={24} color={Colors.bg} />
+          <Text style={styles.fabQuickSaleText}>Quick Sale</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Add/Edit Modal */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeForm}>
         <SafeAreaView style={styles.modalContainer}>
@@ -927,5 +940,7 @@ const styles = StyleSheet.create({
   errorText: { color: Colors.textPrimary, fontSize: 13 },
   submitButton: { backgroundColor: Colors.accent, height: 56, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 12, marginBottom: 40 },
   submitButtonDisabled: { opacity: 0.7 },
-  submitButtonText: { color: Colors.bg, fontSize: 16, fontWeight: '700' }
+  submitButtonText: { color: Colors.bg, fontSize: 16, fontWeight: '700' },
+  fabQuickSale: { position: 'absolute', bottom: 24, right: 20, backgroundColor: Colors.accent, flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, borderRadius: 30, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 5 },
+  fabQuickSaleText: { color: Colors.bg, fontSize: 16, fontWeight: '700', marginLeft: 8 }
 });

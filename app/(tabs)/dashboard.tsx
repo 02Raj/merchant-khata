@@ -162,16 +162,28 @@ export default function DashboardScreen() {
               <Text style={styles.sectionTitle}>Quick Actions</Text>
               <View style={styles.actionsGrid}>
                 {isRestaurant ? (
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => handleQuickAction('/(tabs)/tables')}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
-                      <Ionicons name="restaurant" size={24} color={Colors.ok} />
-                    </View>
-                    <Text style={styles.actionText}>Tables</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity
+                      style={styles.actionButton}
+                      onPress={() => handleQuickAction('/kot/new?type=takeaway')}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
+                        <Ionicons name="cart" size={24} color={Colors.ok} />
+                      </View>
+                      <Text style={styles.actionText}>Quick Sale</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.actionButton}
+                      onPress={() => handleQuickAction('/(tabs)/tables')}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                        <Ionicons name="restaurant" size={24} color="#3B82F6" />
+                      </View>
+                      <Text style={styles.actionText}>Tables</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : (
                   <TouchableOpacity
                     style={styles.actionButton}

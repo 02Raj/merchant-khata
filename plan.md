@@ -60,47 +60,47 @@
 | 1.3.7 | Edit Product (tap to edit) | ✅ | Pre-filled form, Supabase update |
 | 1.3.8 | Form validation | ✅ | Required fields + numeric checks |
 
-### 1.4 Sales / Billing ⬜ NEXT PRIORITY
+### 1.4 Sales / Billing ✅ COMPLETE
 
 | # | Task | Status | Details |
 |---|---|---|---|
-| 1.4.1 | New Sale flow | ⬜ | Select customer → add products → set payment type |
-| 1.4.2 | Product picker (from existing catalog) | ⬜ | Search + select with quantity input |
-| 1.4.3 | Cart/line items management | ⬜ | Add/remove items, auto-calculate subtotals |
-| 1.4.4 | Payment type selection | ⬜ | Cash / UPI / Credit (udhaar) / Partial |
-| 1.4.5 | Bill generation + Supabase insert | ⬜ | Insert `sales` + `sale_items` + `inventory_transactions` |
-| 1.4.6 | Auto-create ledger entry for credit sales | ⬜ | Insert `ledger_transactions` when payment_type = credit |
-| 1.4.7 | Sale history list | ⬜ | View past sales with details |
-| 1.4.8 | Wholesale price auto-selection | ⬜ | Use wholesale_price when customer_type = wholesale |
+| 1.4.1 | New Sale flow | ✅ | Select customer → add products → set payment type |
+| 1.4.2 | Product picker (from existing catalog) | ✅ | Search + select with quantity input |
+| 1.4.3 | Cart/line items management | ✅ | Add/remove items, auto-calculate subtotals |
+| 1.4.4 | Payment type selection | ✅ | Cash / UPI / Credit (udhaar) / Partial |
+| 1.4.5 | Bill generation + Supabase insert | ✅ | Insert `sales` + `sale_items` + `inventory_transactions` |
+| 1.4.6 | Auto-create ledger entry for credit sales | ✅ | Insert `ledger_transactions` when payment_type = credit |
+| 1.4.7 | Sale history list | ✅ | View past sales with details |
+| 1.4.8 | Wholesale price auto-selection | ✅ | Use wholesale_price when customer_type = wholesale |
 
-### 1.5 Customer Management ⬜ UPCOMING
-
-| # | Task | Status | Details |
-|---|---|---|---|
-| 1.5.1 | Customer list (dynamic) | ⬜ | Name, phone, type, balance |
-| 1.5.2 | Add/Edit customer | ⬜ | Name, phone, address, type, credit limit |
-| 1.5.3 | Customer detail view | ⬜ | Purchase history + running balance |
-| 1.5.4 | Udhaar / Credit tracking | ⬜ | Running balance from `ledger_transactions` |
-| 1.5.5 | Record payment received | ⬜ | Insert `payments` + `ledger_transactions` |
-| 1.5.6 | Credit limit enforcement | ⬜ | Warn/block when limit exceeded |
-
-### 1.6 Purchases / Stock-In ⬜ UPCOMING
+### 1.5 Customer Management ✅ COMPLETE
 
 | # | Task | Status | Details |
 |---|---|---|---|
-| 1.6.1 | Supplier list (CRUD) | ⬜ | Name, phone, address |
+| 1.5.1 | Customer list (dynamic) | ✅ | Name, phone, type, balance |
+| 1.5.2 | Add/Edit customer | ✅ | Name, phone, address, type, credit limit |
+| 1.5.3 | Customer detail view | ✅ | Purchase history + running balance |
+| 1.5.4 | Udhaar / Credit tracking | ✅ | Running balance from `ledger_transactions` |
+| 1.5.5 | Record payment received | ✅ | Insert `payments` + `ledger_transactions` |
+| 1.5.6 | Credit limit enforcement | ✅ | Warn/block when limit exceeded |
+
+### 1.6 Purchases / Stock-In ✅ IN PROGRESS
+
+| # | Task | Status | Details |
+|---|---|---|---|
+| 1.6.1 | Supplier list (CRUD) | ✅ | Name, phone, address |
 | 1.6.2 | New purchase entry | ⬜ | Select supplier → add products → quantities |
 | 1.6.3 | Auto-create inventory transactions | ⬜ | Increase stock on purchase |
-| 1.6.4 | Opening stock entry | ⬜ | Bulk add initial inventory for new shops |
+| 1.6.4 | Opening stock entry | ✅ | Bulk add initial inventory for new shops |
 
-### 1.7 Dashboard Data Connection ⬜ BLOCKED
+### 1.7 Dashboard Data Connection ✅ COMPLETE
 
 | # | Task | Status | Blocked By |
 |---|---|---|---|
-| 1.7.1 | Today's Sales (real) | ⬜ | 1.4 (Sales must exist) |
-| 1.7.2 | Pending Receivables (real) | ⬜ | 1.5 (Customer credit must exist) |
-| 1.7.3 | Low Stock count (real) | ⬜ | 1.6 (Stock-in must exist) |
-| 1.7.4 | Recent Activity feed (real) | ⬜ | 1.4 + 1.5 |
+| 1.7.1 | Today's Sales (real) | ✅ | Integrated via useDashboardMetrics |
+| 1.7.2 | Pending Receivables (real) | ✅ | Integrated via useDashboardMetrics |
+| 1.7.3 | Low Stock count (real) | ✅ | Integrated via useDashboardMetrics |
+| 1.7.4 | Recent Activity feed (real) | ✅ | Integrated via useDashboardMetrics |
 
 ---
 

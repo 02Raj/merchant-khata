@@ -103,8 +103,8 @@ export default function TablesScreen() {
       >
         <View style={styles.takeawaySection}>
           <TouchableOpacity style={styles.takeawayButton} onPress={handleTakeaway}>
-            <Ionicons name="bag-handle" size={24} color={Colors.bg} />
-            <Text style={styles.takeawayButtonText}>New Takeaway (Parcel)</Text>
+            <Ionicons name="cart" size={24} color={Colors.bg} />
+            <Text style={styles.takeawayButtonText}>Quick Sale / Takeaway</Text>
           </TouchableOpacity>
           
           {activeTakeaways.length > 0 && (
