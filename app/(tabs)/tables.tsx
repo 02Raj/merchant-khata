@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Modal, TextInput, Alert, RefreshControl, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -89,12 +89,17 @@ export default function TablesScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Tables</Text>
-        {businessInfo?.role !== 'waiter' && (
-          <TouchableOpacity style={styles.addButton} onPress={() => setAddModalVisible(true)}>
-            <Ionicons name="add" size={20} color={Colors.bg} />
-            <Text style={styles.addButtonText}>Add Table</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          {businessInfo?.role !== 'waiter' && (
+            <TouchableOpacity style={styles.addButton} onPress={() => setAddModalVisible(true)}>
+              <Ionicons name="add" size={20} color={Colors.bg} />
+              <Text style={styles.addButtonText}>Add Table</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={{ padding: 4 }} onPress={() => router.push('/settings')}>
+            <Ionicons name="settings-outline" size={24} color={Colors.textSecondary} />
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
       <ScrollView 

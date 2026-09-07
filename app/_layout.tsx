@@ -108,8 +108,9 @@ const styles = StyleSheet.create({
 export default function RootLayout() {
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    void NavigationBar.setBackgroundColorAsync('#ffffff');
-    void NavigationBar.setButtonStyleAsync('dark');
+    if (NavigationBar.setStyle) {
+      NavigationBar.setStyle('light');
+    }
   }, []);
 
   return (

@@ -2,12 +2,14 @@ import { useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { signInAnonymously } from 'firebase/auth';
 
 import FirebaseRecaptchaVerifierModal from '@/components/FirebaseRecaptchaVerifierModal';
 import { authErrorMessage, sendPhoneOtp } from '@/lib/auth';
 import { getFirebaseWebConfig } from '@/lib/firebaseConfig';
 import { toE164India } from '@/lib/phone';
 import { Colors } from '@/lib/theme';
+import { getFirebaseAuth } from '@/lib/firebase';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -49,6 +51,25 @@ export default function LoginScreen() {
     }
   };
 
+  const onJoinAsStaff = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const auth = getFirebaseAuth();
+      await signInAnonymously(auth);
+      // RootNavigator will automatically redirect to business-setup since hasBusiness will be false
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Anonymous Auth is disabled. Please enable it in Firebase Console.');
+      } else {
+        setError('Failed to login as staff. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
@@ -63,11 +84,12 @@ export default function LoginScreen() {
           <View style={styles.header}>
             <Text style={styles.kicker}>OmniBill · Auth</Text>
             <Text style={styles.title}>Login or Signup</Text>
-            <Text style={styles.subtitle}>Enter your mobile number to receive an OTP.</Text>
+            <Text style={styles.subtitle}>Owner: Use mobile number for OTP.</Text>
+            <Text style={styles.subtitle}>Staff: Use the Join as Staff button below.</Text>
           </View>
           
           <View style={styles.form}>
-            <Text style={styles.label}>Phone number</Text>
+            <Text style={styles.label}>Phone number (Owner Only)</Text>
             <View style={styles.inputContainer}>
               <Text style={styles.prefix}>+91</Text>
               <TextInput
@@ -79,7 +101,6 @@ export default function LoginScreen() {
                 placeholder="10-digit mobile"
                 placeholderTextColor={Colors.textSecondary}
                 editable={!loading}
-                autoFocus
               />
             </View>
             
@@ -99,6 +120,25 @@ export default function LoginScreen() {
                 <ActivityIndicator color={Colors.bg} size="small" />
               ) : (
                 <Text style={styles.buttonText}>Send OTP</Text>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.button, styles.buttonSecondary, loading ? styles.buttonDisabled : null]}
+              onPress={onJoinAsStaff}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              {loading ? (
+                <ActivityIndicator color={Colors.textPrimary} size="small" />
+              ) : (
+                <Text style={styles.buttonTextSecondary}>Join as Staff (No OTP)</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -199,6 +239,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.5,
+  },
+  buttonSecondary: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginTop: 0,
+  },
+  buttonTextSecondary: {
+    color: Colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  dividerText: {
+    color: Colors.textSecondary,
+    paddingHorizontal: 16,
+    fontSize: 12,
+    fontWeight: '600',
   },
   errorContainer: {
     backgroundColor: 'rgba(201, 162, 39, 0.15)',

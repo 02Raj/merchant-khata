@@ -453,10 +453,12 @@ const styles = StyleSheet.create({
   },
   actionsGrid: {
     flexDirection: 'row',
-    gap: 12,
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'flex-start',
   },
   actionButton: {
-    flex: 1,
+    width: '30%',
     backgroundColor: Colors.surface,
     borderRadius: 16,
     padding: 16,

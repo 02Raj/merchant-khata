@@ -18,7 +18,7 @@ export default function TabsLayout() {
 
   const bottomInset =
     Platform.OS === 'android'
-      ? Math.max(insets.bottom, ANDROID_NAV_FALLBACK)
+      ? Math.max(insets.bottom, 8) // use a small fallback instead of 48
       : insets.bottom;
 
   return (

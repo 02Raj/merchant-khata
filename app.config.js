@@ -3,7 +3,7 @@ const appJson = require('./app.json');
 module.exports = {
   expo: {
     ...appJson.expo,
-    plugins: [...(appJson.expo.plugins ?? []), 'expo-font'],
+    plugins: [...(appJson.expo.plugins ?? []), 'expo-font', 'expo-sharing', 'expo-splash-screen', 'expo-status-bar'],
     extra: {
       firebase: {
         apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY ?? '',

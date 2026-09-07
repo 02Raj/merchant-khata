@@ -298,13 +298,14 @@ export default function ProductsScreen() {
       setFormError('Business not found. Try restarting the app.');
       return;
     }
-    const finalCategory = formCategory.trim();
-    if (!formName.trim() || !finalCategory || !formUnit.trim() || !formPurchasePrice.trim() || !formSalePrice.trim()) {
-      setFormError('Please fill all required fields.');
+    const finalCategory = formCategory.trim() || 'General';
+    const finalUnit = formUnit.trim() || 'pcs';
+    if (!formName.trim() || !formSalePrice.trim()) {
+      setFormError('Please fill the Product Name and Sale Price.');
       return;
     }
 
-    const purchase = parseFloat(formPurchasePrice);
+    const purchase = formPurchasePrice.trim() ? parseFloat(formPurchasePrice) : 0;
     const sale = parseFloat(formSalePrice);
     if (isNaN(purchase) || purchase < 0 || isNaN(sale) || sale < 0) {
       setFormError('Prices must be valid positive numbers.');
@@ -373,8 +374,8 @@ export default function ProductsScreen() {
       const payload = {
         business_id: businessInfo.id,
         name: formName.trim(),
-        category: formCategory.trim(),
-        unit: formUnit.trim(),
+        category: finalCategory,
+        unit: finalUnit,
         purchase_price: purchase,
         sale_price: sale,
         wholesale_price: wholesale,
@@ -627,7 +628,7 @@ export default function ProductsScreen() {
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Category *</Text>
+                <Text style={styles.label}>Category (Optional)</Text>
                 {formIsCustomCategory ? (
                   <View style={styles.row}>
                     <TextInput style={[styles.input, { flex: 1 }]} value={formCategory} onChangeText={setFormCategory} placeholder="Enter Custom Category" placeholderTextColor={Colors.textSecondary} />
@@ -653,7 +654,7 @@ export default function ProductsScreen() {
 
               <View style={styles.row}>
                 <View style={[styles.formGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Unit Type & Unit *</Text>
+                  <Text style={styles.label}>Unit Type & Unit (Optional)</Text>
                   <View style={styles.unitTypeToggle}>
                     <TouchableOpacity style={[styles.toggleBtn, formUnitCategory === 'quantity' && styles.toggleBtnActive]} onPress={() => { setFormUnitCategory('quantity'); setFormUnit('pcs'); }}>
                       <Text style={[styles.toggleBtnText, formUnitCategory === 'quantity' && styles.toggleBtnTextActive]}>Quantity</Text>
@@ -676,7 +677,7 @@ export default function ProductsScreen() {
 
               <View style={styles.row}>
                 <View style={[styles.formGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Purchase Price (₹) *</Text>
+                  <Text style={styles.label}>Purchase Price (₹)</Text>
                   <TextInput style={styles.input} value={formPurchasePrice} onChangeText={setFormPurchasePrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={Colors.textSecondary} />
                 </View>
                 <View style={[styles.formGroup, { flex: 1 }]}>
