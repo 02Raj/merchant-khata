@@ -36,14 +36,17 @@ type Product = {
   alternate_unit: string | null;
   conversion_factor: number | null;
 };
-
 const PREDEFINED_CATEGORIES = ['Groceries', 'Electronics', 'Clothing', 'Hardware', 'Dairy', 'Spices', 'Snacks', 'Beverages'];
+const FOOD_CATEGORIES = ['Starters', 'Mains', 'Breads', 'Rice', 'Chinese', 'Beverages', 'Desserts', 'Combos'];
 const QUANTITY_UNITS = ['pcs', 'box', 'pack', 'dozen', 'carton'];
 const MEASUREMENT_UNITS = ['kg', 'g', 'ltr', 'ml', 'meter'];
+
 const GST_RATES = [0, 5, 12, 18, 28];
 
 export default function ProductsScreen() {
   const { businessInfo } = useAuth();
+  const isRestaurant = businessInfo?.business_type === 'restaurant';
+  const categoryOptions = isRestaurant ? FOOD_CATEGORIES : PREDEFINED_CATEGORIES;
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -484,12 +487,14 @@ export default function ProductsScreen() {
                 <Text style={[styles.stockText, { color: Colors.textSecondary, fontSize: 10 }]}>Inactive</Text>
               </View>
             ) : null}
+          {isRestaurant ? null : (
           <View style={[styles.stockBadge, { backgroundColor: stockColor + '20' }]}>
             <View style={[styles.stockDot, { backgroundColor: stockColor }]} />
             <Text style={[styles.stockText, { color: stockColor }]}>
               {item.stockCount} {item.unit}
             </Text>
           </View>
+          )}
           </View>
         </View>
         
@@ -499,7 +504,9 @@ export default function ProductsScreen() {
           <View>
             <Text style={styles.priceLabel}>Sale Price</Text>
             <Text style={styles.priceValue}>₹{item.sale_price.toFixed(2)}</Text>
+            {isRestaurant ? null : (
             <Text style={styles.gstText}>{item.gst_rate}% GST {item.tax_inclusive ? '(Inc)' : '(Exc)'}</Text>
+            )}
           </View>
           {businessInfo?.business_type !== 'retail' && item.wholesale_price ? (
             <View>
@@ -517,14 +524,16 @@ export default function ProductsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.kicker}>Inventory</Text>
-          <Text style={styles.title}>Products</Text>
+          <Text style={styles.kicker}>{isRestaurant ? 'Kitchen' : 'Inventory'}</Text>
+          <Text style={styles.title}>{isRestaurant ? 'Menu' : 'Products'}</Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
+          {isRestaurant ? null : (
           <TouchableOpacity style={styles.scanAddButton} onPress={openScanner} disabled={!businessInfo}>
             <Ionicons name="barcode-outline" size={20} color={Colors.bg} />
             <Text style={styles.addButtonText}>Scan</Text>
           </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.addButton} onPress={openAddModal} disabled={!businessInfo}>
             <Ionicons name="add" size={24} color={Colors.bg} />
             <Text style={styles.addButtonText}>Add</Text>
@@ -639,7 +648,7 @@ export default function ProductsScreen() {
                 ) : (
                   <View style={styles.unitSelector}>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                      {PREDEFINED_CATEGORIES.map(c => (
+                      {categoryOptions.map(c => (
                         <TouchableOpacity key={c} style={[styles.unitChip, formCategory === c && styles.unitChipActive]} onPress={() => setFormCategory(c)}>
                           <Text style={[styles.unitChipText, formCategory === c && styles.unitChipTextActive]}>{c}</Text>
                         </TouchableOpacity>
@@ -652,6 +661,7 @@ export default function ProductsScreen() {
                 )}
               </View>
 
+              {!isRestaurant ? (
               <View style={styles.row}>
                 <View style={[styles.formGroup, { flex: 1 }]}>
                   <Text style={styles.label}>Unit Type & Unit (Optional)</Text>
@@ -674,24 +684,46 @@ export default function ProductsScreen() {
                   </View>
                 </View>
               </View>
+              ) : null}
 
               <View style={styles.row}>
+                {!isRestaurant ? (
                 <View style={[styles.formGroup, { flex: 1 }]}>
                   <Text style={styles.label}>Purchase Price (₹)</Text>
                   <TextInput style={styles.input} value={formPurchasePrice} onChangeText={setFormPurchasePrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={Colors.textSecondary} />
                 </View>
+                ) : null}
                 <View style={[styles.formGroup, { flex: 1 }]}>
                   <Text style={styles.label}>Sale Price (₹) *</Text>
                   <TextInput style={styles.input} value={formSalePrice} onChangeText={setFormSalePrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={Colors.textSecondary} />
                 </View>
               </View>
 
+              {!isRestaurant ? (
               <View style={styles.formGroup}>
                 <Text style={styles.label}>{editingId ? 'Current Stock' : 'Opening Stock'}</Text>
                 <TextInput style={styles.input} value={formOpeningStock} onChangeText={setFormOpeningStock} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textSecondary} />
               </View>
+              ) : null}
+
+              {(businessInfo?.business_type === 'wholesale' || businessInfo?.business_type === 'both') && (
+                <View style={styles.row}>
+                  <View style={[styles.formGroup, { flex: 1 }]}>
+                    <Text style={styles.label}>
+                      {businessInfo.business_type === 'wholesale' ? 'Wholesale Price (₹) *' : 'Wholesale Price (₹)'}
+                    </Text>
+                    <TextInput style={styles.input} value={formWholesalePrice} onChangeText={setFormWholesalePrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={Colors.textSecondary} />
+                  </View>
+                  <View style={[styles.formGroup, { flex: 1 }]}>
+                    <Text style={styles.label}>Min Qty (MOQ)</Text>
+                    <TextInput style={styles.input} value={formMoq} onChangeText={setFormMoq} keyboardType="numeric" placeholder="Optional" placeholderTextColor={Colors.textSecondary} />
+                  </View>
+                </View>
+              )}
 
               {/* --- TOGGLE BUTTON --- */}
+              {!isRestaurant ? (
+                <>
               <TouchableOpacity 
                 style={styles.advancedToggleBtn} 
                 onPress={() => setShowAdvancedOptions(!showAdvancedOptions)}
@@ -699,7 +731,7 @@ export default function ProductsScreen() {
               >
                 <Ionicons name={showAdvancedOptions ? "chevron-up" : "chevron-down"} size={20} color={Colors.accent} />
                 <Text style={styles.advancedToggleText}>
-                  {showAdvancedOptions ? "Hide Advanced Details" : "Add Advanced Details (Barcode, Tax, Wholesale)"}
+                  {showAdvancedOptions ? "Hide Advanced Details" : "Add Advanced Details (Barcode, Tax, Pack)"}
                 </Text>
               </TouchableOpacity>
 
@@ -790,23 +822,10 @@ export default function ProductsScreen() {
                     )}
                   </View>
 
-                  {(businessInfo?.business_type === 'wholesale' || businessInfo?.business_type === 'both') && (
-                    <View style={styles.wholesaleContainer}>
-                      <Text style={styles.sectionDivider}>Wholesale Options</Text>
-                      <View style={styles.row}>
-                        <View style={[styles.formGroup, { flex: 1 }]}>
-                          <Text style={styles.label}>Wholesale Price</Text>
-                          <TextInput style={styles.input} value={formWholesalePrice} onChangeText={setFormWholesalePrice} keyboardType="numeric" placeholder="0.00" placeholderTextColor={Colors.textSecondary} />
-                        </View>
-                        <View style={[styles.formGroup, { flex: 1 }]}>
-                          <Text style={styles.label}>Min Qty (MOQ)</Text>
-                          <TextInput style={styles.input} value={formMoq} onChangeText={setFormMoq} keyboardType="numeric" placeholder="10" placeholderTextColor={Colors.textSecondary} />
-                        </View>
-                      </View>
-                    </View>
-                  )}
                 </View>
               )}
+                </>
+              ) : null}
 
               {editingId ? (
                 <TouchableOpacity
@@ -827,7 +846,7 @@ export default function ProductsScreen() {
               )}
 
               <TouchableOpacity style={[styles.submitButton, saving && styles.submitButtonDisabled]} onPress={onSubmitForm} disabled={saving}>
-                {saving ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitButtonText}>Save Product</Text>}
+                {saving ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.submitButtonText}>{isRestaurant ? 'Save dish' : 'Save Product'}</Text>}
               </TouchableOpacity>
             </ScrollView>
           </KeyboardAvoidingView>

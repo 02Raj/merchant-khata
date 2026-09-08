@@ -1,9 +1,11 @@
 import { useState, useCallback, useMemo } from 'react';
-import { 
+import {
   StyleSheet, Text, View, FlatList, TouchableOpacity, 
   TextInput, RefreshControl, ActivityIndicator, Modal,
   KeyboardAvoidingView, Platform, Alert
 } from 'react-native';
+// Restaurant raw-material CRUD stays here for a later kitchen pack.
+// Launch hides this tab (HIDE_RESTAURANT_LAUNCH_EXTRAS). Do not delete this screen.
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';

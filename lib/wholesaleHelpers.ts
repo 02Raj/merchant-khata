@@ -21,6 +21,16 @@ export function shouldShowPricingToggle(businessType: string | undefined): boole
   return isHybridShop(businessType) || businessType === 'wholesale';
 }
 
+/** Pure wholesale bills are party-first; walk-in is the fallback, not the default job. */
+export function usesPartyFirstBilling(businessType: string | undefined): boolean {
+  return businessType === 'wholesale';
+}
+
+/** Header Mode toggle stays off; rate extras live in cart Extra. */
+export function showHeaderPricingMode(_businessType: string | undefined): boolean {
+  return false;
+}
+
 export function walkInCustomerLabel(businessType: string | undefined): string {
   if (businessType === 'wholesale') return 'Walk-in (Wholesale)';
   return 'Walk-in (Retail)';

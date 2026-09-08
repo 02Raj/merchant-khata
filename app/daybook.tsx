@@ -126,8 +126,8 @@ export default function DayBookScreen() {
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View>
-          <Text style={styles.title}>Day Book</Text>
-          <Text style={styles.subtitle}>{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</Text>
+          <Text style={styles.title}>Daybook</Text>
+          <Text style={styles.subtitle}>{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · today only</Text>
         </View>
         <View style={{ width: 40 }} />
       </View>
@@ -157,13 +157,13 @@ export default function DayBookScreen() {
             </View>
             <View style={styles.divider} />
             <View style={styles.row}>
-              <View style={[styles.rowIcon, { backgroundColor: 'rgba(59,130,246,0.1)' }]}><Ionicons name="phone-portrait" size={20} color="#3B82F6" /></View>
+              <View style={[styles.rowIcon, { backgroundColor: Colors.accentDim }]}><Ionicons name="phone-portrait" size={20} color={Colors.accent} /></View>
               <Text style={styles.rowLabel}>UPI / Online</Text>
               <Text style={styles.rowValue}>₹ {metrics.upiSales.toLocaleString('en-IN')}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.row}>
-              <View style={[styles.rowIcon, { backgroundColor: 'rgba(239,68,68,0.1)' }]}><Ionicons name="book" size={20} color="#EF4444" /></View>
+              <View style={[styles.rowIcon, { backgroundColor: Colors.warn + '22' }]}><Ionicons name="book" size={20} color={Colors.warn} /></View>
               <Text style={styles.rowLabel}>Udhaar (Credit) Sales</Text>
               <Text style={styles.rowValue}>₹ {metrics.creditSales.toLocaleString('en-IN')}</Text>
             </View>
@@ -183,7 +183,7 @@ export default function DayBookScreen() {
             </View>
             <View style={styles.divider} />
             <View style={styles.row}>
-              <View style={[styles.rowIcon, { backgroundColor: 'rgba(59,130,246,0.1)' }]}><Ionicons name="phone-portrait-outline" size={20} color="#3B82F6" /></View>
+              <View style={[styles.rowIcon, { backgroundColor: Colors.accentDim }]}><Ionicons name="phone-portrait-outline" size={20} color={Colors.accent} /></View>
               <Text style={styles.rowLabel}>UPI Received</Text>
               <Text style={styles.rowValue}>₹ {metrics.upiRecovered.toLocaleString('en-IN')}</Text>
             </View>

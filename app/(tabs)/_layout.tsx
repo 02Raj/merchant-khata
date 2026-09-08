@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
+import { HIDE_RESTAURANT_LAUNCH_EXTRAS } from '@/lib/restaurantHelpers';
 
 const TAB_BAR_CONTENT_HEIGHT = 56;
 // 3-button nav phones often report 0 inset without edge-to-edge; keep tabs above system buttons.
@@ -14,6 +15,7 @@ export default function TabsLayout() {
   const { businessInfo } = useAuth();
   const isRestaurant = businessInfo?.business_type === 'restaurant';
   const isWaiter = businessInfo?.role === 'waiter';
+  const hideRestaurantExtras = isRestaurant && HIDE_RESTAURANT_LAUNCH_EXTRAS;
   const insets = useSafeAreaInsets();
 
   const bottomInset =
@@ -70,7 +72,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="sales"
         options={{
-          title: 'Sales',
+          title: 'Bill',
           href: !isRestaurant && !isWaiter ? '/(tabs)/sales' : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="receipt" size={size} color={color} />
@@ -81,7 +83,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="products"
         options={{
-          title: 'Products',
+          title: isRestaurant ? 'Menu' : 'Items',
           href: isWaiter ? null : '/(tabs)/products',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cube" size={size} color={color} />
@@ -91,8 +93,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="customers"
         options={{
-          title: 'Customers',
-          href: isWaiter ? null : '/(tabs)/customers',
+          title: 'Khata',
+          // Restaurant: party ledger is post-MVP. Screen kept for a later toggle.
+          href: isWaiter || hideRestaurantExtras ? null : '/(tabs)/customers',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="people" size={size} color={color} />
           ),
@@ -102,7 +105,8 @@ export default function TabsLayout() {
         name="suppliers"
         options={{
           title: 'Suppliers',
-          href: isWaiter ? null : '/(tabs)/suppliers',
+          // Merchant stock-in lives on Home. Restaurant suppliers are post-MVP.
+          href: isWaiter || isRestaurant ? null : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="bus" size={size} color={color} />
           ),
@@ -112,7 +116,8 @@ export default function TabsLayout() {
         name="inventory"
         options={{
           title: 'Inventory',
-          href: isWaiter ? null : '/(tabs)/inventory',
+          // Restaurant raw materials / recipes stay in code (inventory.tsx) for later.
+          href: isWaiter ? null : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="clipboard" size={size} color={color} />
           ),

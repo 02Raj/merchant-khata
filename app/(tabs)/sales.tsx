@@ -21,7 +21,9 @@ import {
   resolveNewCustomerType,
   resolvePricingModeFromCustomer,
   shouldShowPricingToggle,
+  showHeaderPricingMode,
   toggleCartLineRate,
+  usesPartyFirstBilling,
   walkInCustomerLabel,
 } from '@/lib/wholesaleHelpers';
 import { getPrinterPaperSize } from '@/lib/printerSettings';
@@ -96,6 +98,8 @@ export default function SalesScreen() {
   const [pricingMode, setPricingMode] = useState<'retail' | 'wholesale'>('retail');
 
   const showPricingToggle = shouldShowPricingToggle(businessInfo?.business_type);
+  const partyFirst = usesPartyFirstBilling(businessInfo?.business_type);
+  const showHeaderMode = showHeaderPricingMode(businessInfo?.business_type);
 
   const defaultPricingMode = resolveDefaultPricingMode(businessInfo?.business_type);
 
@@ -106,6 +110,7 @@ export default function SalesScreen() {
   // Cart state
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartModalVisible, setCartModalVisible] = useState(false);
+  const [showExtraPricing, setShowExtraPricing] = useState(false);
   
   // Checkout state
   const [checkoutModalVisible, setCheckoutModalVisible] = useState(false);
@@ -549,6 +554,14 @@ export default function SalesScreen() {
     selectedCustomer,
   ]);
 
+  const partyLimitHint = useMemo(() => {
+    if (!selectedCustomer) return null;
+    const limit = selectedCustomer.credit_limit;
+    if (limit == null || limit <= 0) return `Due ₹${selectedCustomer.balance.toLocaleString('en-IN')}`;
+    const remaining = Math.max(0, limit - selectedCustomer.balance);
+    return `Due ₹${selectedCustomer.balance.toLocaleString('en-IN')} · Limit left ₹${remaining.toLocaleString('en-IN')}`;
+  }, [selectedCustomer]);
+
   const runCheckout = async () => {
     if (cart.length === 0) return;
 
@@ -709,30 +722,40 @@ export default function SalesScreen() {
       </View>
 
       {/* Customer Picker */}
-      <View style={{ paddingHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <TouchableOpacity style={[styles.customerSelector, { flex: 1 }]} onPress={() => {
-          setCustomerSearchQuery('');
-          setCustomerModalVisible(true);
-        }}>
+      <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+        <TouchableOpacity
+          style={[
+            styles.customerSelector,
+            partyFirst && !selectedCustomer && styles.customerSelectorPartyFirst,
+          ]}
+          onPress={() => {
+            setCustomerSearchQuery('');
+            setCustomerModalVisible(true);
+          }}
+        >
           <Ionicons name="person" size={20} color={selectedCustomer ? Colors.accent : Colors.textSecondary} />
-          <View>
-            <Text style={styles.customerLabel}>Customer</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.customerLabel}>{partyFirst ? 'Party' : 'Customer'}</Text>
             <Text style={styles.customerName}>
               {selectedCustomer ? selectedCustomer.name : walkInCustomerLabel(businessInfo?.business_type)}
             </Text>
+            {partyFirst && !selectedCustomer ? (
+              <Text style={styles.partyHint}>Select party for rate and udhaar</Text>
+            ) : null}
+            {partyLimitHint ? <Text style={styles.partyHint}>{partyLimitHint}</Text> : null}
           </View>
-          <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} style={{ marginLeft: 'auto' }} />
+          <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} />
         </TouchableOpacity>
 
-        {showPricingToggle && (
-          <TouchableOpacity 
+        {showHeaderMode && showPricingToggle && (
+          <TouchableOpacity
             style={[
-              styles.customerSelector, 
-              { paddingHorizontal: 12, backgroundColor: pricingMode === 'wholesale' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(34, 197, 94, 0.1)' }
-            ]} 
+              styles.customerSelector,
+              { marginTop: 8, paddingHorizontal: 12, backgroundColor: pricingMode === 'wholesale' ? Colors.accentDim : Colors.surface },
+            ]}
             onPress={() => setPricingMode(prev => prev === 'retail' ? 'wholesale' : 'retail')}
           >
-            <View style={{ alignItems: 'center' }}>
+            <View style={{ alignItems: 'center', flex: 1 }}>
               <Text style={{ fontSize: 10, color: Colors.textSecondary, fontWeight: 'bold', textTransform: 'uppercase' }}>Mode</Text>
               <Text style={{ fontSize: 13, fontWeight: '700', color: pricingMode === 'wholesale' ? Colors.accent : Colors.ok, marginTop: 2 }}>
                 {pricingMode === 'wholesale' ? 'Wholesale' : 'Retail'}
@@ -807,10 +830,36 @@ export default function SalesScreen() {
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Your Cart</Text>
-            <TouchableOpacity onPress={() => setCartModalVisible(false)} style={styles.modalClose}>
-              <Ionicons name="close" size={24} color={Colors.textPrimary} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              {showPricingToggle ? (
+                <TouchableOpacity onPress={() => setShowExtraPricing((v) => !v)}>
+                  <Text style={styles.extraLink}>{showExtraPricing ? 'Hide extra' : 'Extra'}</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity onPress={() => setCartModalVisible(false)} style={styles.modalClose}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
           </View>
+          {showPricingToggle && showExtraPricing ? (
+            <View style={styles.extraPricingBar}>
+              <Text style={styles.extraPricingLabel}>New items add at</Text>
+              <View style={styles.typeToggleContainer}>
+                <TouchableOpacity
+                  style={[styles.typeToggleBtn, pricingMode === 'retail' && styles.typeToggleBtnActive]}
+                  onPress={() => setPricingMode('retail')}
+                >
+                  <Text style={[styles.typeToggleText, pricingMode === 'retail' && styles.typeToggleTextActive]}>Retail</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.typeToggleBtn, pricingMode === 'wholesale' && styles.typeToggleBtnActive]}
+                  onPress={() => setPricingMode('wholesale')}
+                >
+                  <Text style={[styles.typeToggleText, pricingMode === 'wholesale' && styles.typeToggleTextActive]}>Wholesale</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
           <FlatList
             data={cart}
             keyExtractor={item => item.lineId}
@@ -842,7 +891,7 @@ export default function SalesScreen() {
                     {showPricingToggle && item.is_wholesale_rate && <Text style={styles.wholesaleBadge}> (Wholesale)</Text>}
                     {showPricingToggle && !item.is_wholesale_rate && <Text style={styles.retailBadge}> (Retail)</Text>}
                   </Text>
-                  {showPricingToggle && item.product.wholesale_price != null ? (
+                  {showPricingToggle && showExtraPricing && item.product.wholesale_price != null ? (
                     <TouchableOpacity onPress={() => toggleLinePricing(item.lineId)}>
                       <Text style={styles.lineRateToggle}>
                         Switch to {item.is_wholesale_rate ? 'Retail' : 'Wholesale'} rate
@@ -922,10 +971,15 @@ export default function SalesScreen() {
       <Modal visible={customerModalVisible} animationType="slide" presentationStyle="pageSheet">
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Select Customer</Text>
-            <TouchableOpacity onPress={() => setCustomerModalVisible(false)} style={styles.modalClose}>
-              <Ionicons name="close" size={24} color={Colors.textPrimary} />
-            </TouchableOpacity>
+            <Text style={styles.modalTitle}>{partyFirst ? 'Select Party' : 'Select Customer'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <TouchableOpacity style={styles.headerAddParty} onPress={() => setAddCustomerModalVisible(true)}>
+                <Ionicons name="person-add" size={18} color={Colors.accent} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setCustomerModalVisible(false)} style={styles.modalClose}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
           </View>
           <View style={styles.searchSection}>
             <View style={styles.searchBox}>
@@ -954,8 +1008,8 @@ export default function SalesScreen() {
                     <Ionicons name="walk" size={20} color={Colors.textSecondary} />
                   </View>
                   <View>
-                    <Text style={styles.customerRowName}>Walk-in Customer</Text>
-                    <Text style={styles.customerRowType}>Retail</Text>
+                    <Text style={styles.customerRowName}>{walkInCustomerLabel(businessInfo?.business_type)}</Text>
+                    <Text style={styles.customerRowType}>{partyFirst ? 'Cash party' : 'Walk-in'}</Text>
                   </View>
                 </TouchableOpacity>
               ) : null
@@ -1191,6 +1245,12 @@ const styles = StyleSheet.create({
   kicker: { fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase', color: Colors.accentInk, marginBottom: 4, fontWeight: '600' },
   title: { fontSize: 28, fontWeight: '700', color: Colors.textPrimary },
   customerSelector: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
+  customerSelectorPartyFirst: { borderColor: Colors.accent, backgroundColor: Colors.accentDim },
+  partyHint: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  extraLink: { color: Colors.accentInk, fontSize: 14, fontWeight: '600' },
+  extraPricingBar: { paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
+  extraPricingLabel: { fontSize: 12, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  headerAddParty: { padding: 6 },
   customerLabel: { fontSize: 11, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
   customerName: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary },
   searchSection: { padding: 16, paddingBottom: 0 },

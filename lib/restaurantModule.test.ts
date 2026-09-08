@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import {
+  HIDE_RESTAURANT_LAUNCH_EXTRAS,
   buildRawMaterialInsertPayload,
   isRestaurantBusiness,
   isRestaurantWaiter,
@@ -24,6 +25,7 @@ describe('Restaurant Module — Setup & Navigation (F1)', () => {
     expect(isRestaurantBusiness('restaurant')).toBe(true);
     expect(isRestaurantBusiness('retail')).toBe(false);
     expect(isRestaurantBusiness('both')).toBe(false);
+    expect(HIDE_RESTAURANT_LAUNCH_EXTRAS).toBe(true);
   });
 
   it('F1.2 — tables tab shown instead of sales for restaurant', () => {
@@ -45,6 +47,12 @@ describe('Restaurant Module — Setup & Navigation (F1)', () => {
     const src = read('app/(tabs)/_layout.tsx');
     expect(src).toContain('isWaiter');
     expect(src).toMatch(/href:\s*isWaiter\s*\?\s*null/);
+  });
+
+  it('F1.5 — launch hides khata/suppliers/inventory tabs for restaurant', () => {
+    const src = read('app/(tabs)/_layout.tsx');
+    expect(src).toContain('hideRestaurantExtras');
+    expect(src).toContain('HIDE_RESTAURANT_LAUNCH_EXTRAS');
   });
 });
 
@@ -104,6 +112,7 @@ describe('Restaurant Module — Menu / Variants / Modifiers (F3)', () => {
     expect(src).toContain("from('modifiers')");
     expect(src).toContain("from('recipes')");
     expect(src).toContain('raw_materials');
+    expect(src).toContain('showKitchenExtra');
   });
 
   it('F3.3 — menu items do not track product stock', () => {
@@ -207,6 +216,8 @@ describe('Restaurant Module — Staff / Settings (F6)', () => {
     const src = read('app/settings.tsx');
     expect(src).toContain('Waiter Invite Code');
     expect(src).toContain("business_type === 'restaurant'");
+    expect(src).toContain('HIDE_RESTAURANT_LAUNCH_EXTRAS');
+    expect(src).toContain('showStaffExtra');
   });
 
   it('F6.2 — waiter role routing helper', () => {

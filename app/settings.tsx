@@ -10,6 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { HIDE_RESTAURANT_LAUNCH_EXTRAS, isRestaurantBusiness } from '@/lib/restaurantHelpers';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -19,6 +20,7 @@ export default function SettingsScreen() {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showStaffExtra, setShowStaffExtra] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -175,10 +177,22 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Staff Management Section */}
+        {/* Staff / waiter invite — restaurant launch hides this; login + generateInviteCode stay for later. */}
         {businessInfo?.role === 'owner' && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Staff Management</Text>
+            {isRestaurantBusiness(businessInfo?.business_type) && HIDE_RESTAURANT_LAUNCH_EXTRAS ? (
+              <TouchableOpacity style={styles.extraToggle} onPress={() => setShowStaffExtra((v) => !v)}>
+                <Text style={styles.extraToggleText}>
+                  {showStaffExtra ? 'Hide extra (waiter phones)' : 'Extra — waiter invite (later)'}
+                </Text>
+                <Ionicons name={showStaffExtra ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.accent} />
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.sectionTitle}>Staff Management</Text>
+            )}
+            {(!isRestaurantBusiness(businessInfo?.business_type) ||
+              !HIDE_RESTAURANT_LAUNCH_EXTRAS ||
+              showStaffExtra) && (
             <View style={styles.card}>
               <View style={styles.settingRow}>
                 <View style={{ flex: 1 }}>
@@ -212,6 +226,7 @@ export default function SettingsScreen() {
                 </TouchableOpacity>
               )}
             </View>
+            )}
           </View>
         )}
 
@@ -274,6 +289,8 @@ const styles = StyleSheet.create({
   
   content: { flex: 1, padding: 16 },
   section: { marginBottom: 24 },
+  extraToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 4 },
+  extraToggleText: { fontSize: 13, color: Colors.accentInk, fontWeight: '600' },
   sectionTitle: { fontSize: 13, textTransform: 'uppercase', color: Colors.textSecondary, fontWeight: '600', letterSpacing: 1, marginBottom: 12, marginLeft: 4 },
   card: { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
   

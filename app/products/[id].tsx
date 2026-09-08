@@ -19,6 +19,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
+import { HIDE_RESTAURANT_LAUNCH_EXTRAS } from '@/lib/restaurantHelpers';
 
 type Variant = { id: string; name: string; price: number };
 type Modifier = { id: string; name: string; extra_price: number };
@@ -50,6 +51,7 @@ export default function ProductDetailScreen() {
   const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
   const [selectedRawMaterial, setSelectedRawMaterial] = useState('');
   const [recipeQty, setRecipeQty] = useState('');
+  const [showKitchenExtra, setShowKitchenExtra] = useState(!HIDE_RESTAURANT_LAUNCH_EXTRAS);
 
   useEffect(() => {
     fetchProductDetails();
@@ -228,10 +230,6 @@ export default function ProductDetailScreen() {
                 <Text style={styles.itemTitle}>{v.name}</Text>
                 <Text style={styles.itemSub}>₹{v.price}</Text>
               </View>
-              <TouchableOpacity style={styles.recipeBtn} onPress={() => openRecipeModal(v)}>
-                <Ionicons name="nutrition" size={16} color={Colors.bg} />
-                <Text style={styles.recipeBtnText}>BOM</Text>
-              </TouchableOpacity>
               <TouchableOpacity onPress={() => deleteVariant(v.id)} style={{ marginLeft: 16 }}>
                 <Ionicons name="trash" size={20} color={Colors.warn} />
               </TouchableOpacity>
@@ -247,7 +245,16 @@ export default function ProductDetailScreen() {
           </View>
         </View>
 
-        {/* Modifiers Section */}
+        <TouchableOpacity style={styles.extraToggle} onPress={() => setShowKitchenExtra((v) => !v)}>
+          <Text style={styles.extraToggleText}>
+            {showKitchenExtra ? 'Hide extra (add-ons & recipes)' : 'Extra — add-ons & recipes (later)'}
+          </Text>
+          <Ionicons name={showKitchenExtra ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.accent} />
+        </TouchableOpacity>
+
+        {showKitchenExtra ? (
+          <>
+        {/* Modifiers + recipes kept for a future kitchen pack; hidden on restaurant launch. */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Add-ons & Modifiers</Text>
           <Text style={styles.desc}>e.g., Extra Cheese (+₹50), Less Spicy (+₹0)</Text>
@@ -272,6 +279,25 @@ export default function ProductDetailScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Recipes (raw materials)</Text>
+          <Text style={styles.desc}>Optional kitchen costing. Skip for launch — tap a size to map ingredients.</Text>
+          {variants.map((v) => (
+            <View key={v.id} style={styles.listItem}>
+              <Text style={styles.itemTitle}>{v.name}</Text>
+              <TouchableOpacity style={styles.recipeBtn} onPress={() => openRecipeModal(v)}>
+                <Ionicons name="nutrition" size={16} color={Colors.bg} />
+                <Text style={styles.recipeBtnText}>BOM</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+          {variants.length === 0 ? (
+            <Text style={styles.desc}>Add a size above first, then map a recipe.</Text>
+          ) : null}
+        </View>
+          </>
+        ) : null}
       </ScrollView>
 
       {/* Recipe (BOM) Modal */}
@@ -386,6 +412,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
   headerTitle: { fontSize: 20, fontWeight: 'bold', marginLeft: 16, color: Colors.textPrimary },
+  extraToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  extraToggleText: { fontSize: 14, color: Colors.accentInk, fontWeight: '600', flex: 1, marginRight: 8 },
   content: { padding: 16 },
   card: { backgroundColor: Colors.surface, padding: 16, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: Colors.border },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -404,7 +432,7 @@ const styles = StyleSheet.create({
   recipeBtn: { backgroundColor: Colors.textSecondary, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, gap: 4 },
   recipeBtnText: { color: Colors.bg, fontSize: 12, fontWeight: 'bold' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end' },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.5)' },
   modalContent: {
     backgroundColor: Colors.bg,
     borderTopLeftRadius: 24,

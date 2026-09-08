@@ -11,7 +11,9 @@ import {
   resolvePricingModeFromCustomer,
   resolveNewCustomerType,
   shouldShowPricingToggle,
+  showHeaderPricingMode,
   toggleCartLineRate,
+  usesPartyFirstBilling,
   validateWholesaleProductFields,
   validateWholesaleShopProduct,
   walkInCustomerLabel,
@@ -33,6 +35,14 @@ describe('wholesaleHelpers', () => {
     expect(shouldShowPricingToggle('wholesale')).toBe(true);
     expect(shouldShowPricingToggle('both')).toBe(true);
     expect(shouldShowPricingToggle('retail')).toBe(false);
+    expect(showHeaderPricingMode('both')).toBe(false);
+    expect(showHeaderPricingMode('wholesale')).toBe(false);
+  });
+
+  it('uses party-first billing only for wholesale shops', () => {
+    expect(usesPartyFirstBilling('wholesale')).toBe(true);
+    expect(usesPartyFirstBilling('both')).toBe(false);
+    expect(usesPartyFirstBilling('retail')).toBe(false);
   });
 
   it('uses wholesale price when available', () => {

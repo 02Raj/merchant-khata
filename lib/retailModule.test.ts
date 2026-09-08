@@ -310,6 +310,7 @@ describe('Retail Module E2E — Module 8 Print & History', () => {
   it('B9 — dashboard links to sales history', () => {
     const source = readProjectFile('app/(tabs)/dashboard.tsx');
     expect(source).toContain('/sales-history');
+    expect(source).toContain('/daybook');
   });
 });
 

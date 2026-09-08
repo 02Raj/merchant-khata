@@ -61,6 +61,8 @@ describe('Hybrid Module — Shop setup (H1)', () => {
     expect(shouldShowPricingToggle('both')).toBe(true);
     const src = read('app/(tabs)/sales.tsx');
     expect(src).toContain('showPricingToggle');
+    expect(src).toContain('showExtraPricing');
+    expect(src).toContain('showHeaderPricingMode');
   });
 
   it('H1.3 — default pricing mode is retail on hybrid', () => {

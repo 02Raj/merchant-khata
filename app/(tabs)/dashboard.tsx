@@ -103,8 +103,8 @@ export default function DashboardScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.kicker}>Overview</Text>
-            <Text style={styles.title}>OmniBill Dashboard</Text>
+            <Text style={styles.kicker}>Today</Text>
+            <Text style={styles.title}>{businessInfo?.name || 'Home'}</Text>
           </View>
           <TouchableOpacity style={styles.logoutBtn} onPress={() => router.push('/settings')}>
             <Ionicons name="settings-outline" size={24} color={Colors.textSecondary} />
@@ -125,36 +125,40 @@ export default function DashboardScreen() {
             {/* Summary Cards */}
             <View style={styles.metricsGrid}>
               {/* Sales Card */}
-              <View style={[styles.metricCard, styles.metricCardPrimary]}>
+              <TouchableOpacity
+                style={[styles.metricCard, styles.metricCardPrimary]}
+                onPress={() => router.push('/daybook')}
+                activeOpacity={0.85}
+              >
                 <View style={styles.metricHeader}>
                   <Ionicons name="trending-up" size={20} color={Colors.textPrimary} />
                   <Text style={styles.metricTitlePrimary}>Today's Sales</Text>
                 </View>
                 <Text style={styles.metricValuePrimary}>₹ { (metrics?.salesToday || 0).toLocaleString('en-IN')}</Text>
-                <Text style={styles.metricSubtitlePrimary}>{metrics?.salesCount || 0} transactions</Text>
-              </View>
+                <Text style={styles.metricSubtitlePrimary}>{metrics?.salesCount || 0} bills · open daybook</Text>
+              </TouchableOpacity>
 
+              {isRestaurant ? null : (
               <View style={styles.metricsRow}>
-                {/* Udhaar Card */}
-                <View style={styles.metricCard}>
+                <TouchableOpacity style={styles.metricCard} onPress={() => router.push('/(tabs)/customers')} activeOpacity={0.8}>
                   <View style={styles.metricHeader}>
                     <Ionicons name="wallet-outline" size={18} color={Colors.textSecondary} />
-                    <Text style={styles.metricTitle}>Receivables</Text>
+                    <Text style={styles.metricTitle}>Udhaar due</Text>
                   </View>
                   <Text style={styles.metricValue}>₹ {(metrics?.receivables || 0).toLocaleString('en-IN')}</Text>
-                  <Text style={styles.metricSubtitle}>{metrics?.receivablesCount || 0} customers</Text>
-                </View>
+                  <Text style={styles.metricSubtitle}>{metrics?.receivablesCount || 0} parties</Text>
+                </TouchableOpacity>
 
-                {/* Inventory Card */}
-                <View style={styles.metricCard}>
+                <TouchableOpacity style={styles.metricCard} onPress={() => router.push('/(tabs)/inventory')} activeOpacity={0.8}>
                   <View style={styles.metricHeader}>
                     <Ionicons name="alert-circle-outline" size={18} color={Colors.warn} />
-                    <Text style={styles.metricTitle}>Low Stock</Text>
+                    <Text style={styles.metricTitle}>Low stock</Text>
                   </View>
                   <Text style={styles.metricValue}>{metrics?.lowStockCount || 0}</Text>
-                  <Text style={styles.metricSubtitle}>items need refill</Text>
-                </View>
+                  <Text style={styles.metricSubtitle}>items to refill</Text>
+                </TouchableOpacity>
               </View>
+              )}
             </View>
 
             {/* Quick Actions */}
@@ -168,18 +172,18 @@ export default function DashboardScreen() {
                       onPress={() => handleQuickAction('/kot/new?type=takeaway')}
                       activeOpacity={0.7}
                     >
-                      <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
+                      <View style={[styles.actionIconContainer, { backgroundColor: Colors.ok + '26' }]}>
                         <Ionicons name="cart" size={24} color={Colors.ok} />
                       </View>
-                      <Text style={styles.actionText}>Quick Sale</Text>
+                      <Text style={styles.actionText}>Takeaway</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.actionButton}
                       onPress={() => handleQuickAction('/(tabs)/tables')}
                       activeOpacity={0.7}
                     >
-                      <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-                        <Ionicons name="restaurant" size={24} color="#3B82F6" />
+                      <View style={[styles.actionIconContainer, { backgroundColor: Colors.accentDim }]}>
+                        <Ionicons name="restaurant" size={24} color={Colors.accent} />
                       </View>
                       <Text style={styles.actionText}>Tables</Text>
                     </TouchableOpacity>
@@ -190,10 +194,10 @@ export default function DashboardScreen() {
                     onPress={() => handleQuickAction('/(tabs)/sales')}
                     activeOpacity={0.7}
                   >
-                    <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(138, 163, 106, 0.15)' }]}>
+                    <View style={[styles.actionIconContainer, { backgroundColor: Colors.ok + '26' }]}>
                       <Ionicons name="cart" size={24} color={Colors.ok} />
                     </View>
-                    <Text style={styles.actionText}>New Sale</Text>
+                    <Text style={styles.actionText}>New bill</Text>
                   </TouchableOpacity>
                 )}
 
@@ -205,18 +209,7 @@ export default function DashboardScreen() {
                   <View style={[styles.actionIconContainer, { backgroundColor: Colors.accentDim }]}>
                     <Ionicons name="add-circle" size={24} color={Colors.accent} />
                   </View>
-                  <Text style={styles.actionText}>Add Product</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={styles.actionButton}
-                  onPress={() => handleQuickAction('expense')}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                    <Ionicons name="receipt" size={24} color="#EF4444" />
-                  </View>
-                  <Text style={styles.actionText}>Add Expense</Text>
+                  <Text style={styles.actionText}>{isRestaurant ? 'Add dish' : 'Add item'}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity 
@@ -224,10 +217,46 @@ export default function DashboardScreen() {
                   onPress={() => handleQuickAction('/daybook')}
                   activeOpacity={0.7}
                 >
-                  <View style={[styles.actionIconContainer, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-                    <Ionicons name="book" size={24} color="#3B82F6" />
+                  <View style={[styles.actionIconContainer, { backgroundColor: Colors.accentDim }]}>
+                    <Ionicons name="book" size={24} color={Colors.accent} />
                   </View>
-                  <Text style={styles.actionText}>Day Book</Text>
+                  <Text style={styles.actionText}>Daybook</Text>
+                </TouchableOpacity>
+
+                {!isRestaurant ? (
+                  <>
+                    <TouchableOpacity 
+                      style={styles.actionButton}
+                      onPress={() => handleQuickAction('/(tabs)/customers')}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.actionIconContainer, { backgroundColor: Colors.accentDim }]}>
+                        <Ionicons name="wallet" size={24} color={Colors.accent} />
+                      </View>
+                      <Text style={styles.actionText}>Collect</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.actionButton}
+                      onPress={() => handleQuickAction('/(tabs)/suppliers')}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.actionIconContainer, { backgroundColor: Colors.accentDim }]}>
+                        <Ionicons name="bus" size={24} color={Colors.accent} />
+                      </View>
+                      <Text style={styles.actionText}>Stock in</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={() => handleQuickAction('expense')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.actionIconContainer, { backgroundColor: Colors.warn + '26' }]}>
+                    <Ionicons name="receipt" size={24} color={Colors.warn} />
+                  </View>
+                  <Text style={styles.actionText}>Expense</Text>
                 </TouchableOpacity>
               </View>
             </View>

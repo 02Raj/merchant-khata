@@ -44,6 +44,9 @@ describe('Wholesale Module — Products (W2)', () => {
 describe('Wholesale Module — Sales / POS (W3)', () => {
   it('W3.1 — pricing toggle for wholesale shop', () => {
     expect(shouldShowPricingToggle('wholesale')).toBe(true);
+    const src = read('app/(tabs)/sales.tsx');
+    expect(src).toContain('usesPartyFirstBilling');
+    expect(src).toContain('showExtraPricing');
   });
 
   it('W3.2 — default wholesale mode for wholesale shop', () => {

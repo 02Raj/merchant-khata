@@ -1,6 +1,13 @@
 export const RAW_MATERIAL_UNITS = ['g', 'kg', 'ml', 'ltr', 'pcs'] as const;
 export type RawMaterialUnit = (typeof RAW_MATERIAL_UNITS)[number];
 
+/**
+ * Restaurant launch MVP hides kitchen ERP and staff-app extras in the UI.
+ * Implementations stay in settings, inventory, products/[id], and login invite —
+ * turn this off when a shop asks for waiter phones / recipes / raw materials.
+ */
+export const HIDE_RESTAURANT_LAUNCH_EXTRAS = true;
+
 export function isRestaurantBusiness(businessType?: string | null): boolean {
   return businessType === 'restaurant';
 }
