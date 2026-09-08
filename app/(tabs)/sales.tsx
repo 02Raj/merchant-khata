@@ -7,9 +7,8 @@ import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
 import * as Haptics from 'expo-haptics';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { safePrintAsync } from '@/lib/safePrint';
+import { shareHtmlAsPdf } from '@/lib/sharePdf';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { evaluateCreditLimit, parseCreditLimitInput, showCustomerCreditLimitField } from '@/lib/customerKhata';
 import {
@@ -680,13 +679,9 @@ export default function SalesScreen() {
         businessType: businessInfo?.business_type,
       });
       
-      const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
-      
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-      } else {
-        Alert.alert('Error', 'Sharing is not available on this device');
-      }
+      await shareHtmlAsPdf(html, `bill-${snapshot.saleId.slice(0, 8)}.pdf`, {
+        dialogTitle: 'Share Receipt',
+      });
     } catch (error) {
       console.error(error);
       Alert.alert('Error', 'Failed to generate bill PDF');

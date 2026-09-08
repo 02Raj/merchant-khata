@@ -29,8 +29,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
 import * as Linking from 'expo-linking';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
+import { shareHtmlAsPdf } from '@/lib/sharePdf';
 import { supabase } from '@/lib/supabase';
 
 type ProductInventory = {
@@ -208,11 +207,9 @@ export default function InventoryScreen() {
     `;
     
     try {
-      const { uri } = await Print.printToFileAsync({ html });
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: 'Share Purchase Order' });
-      }
+      await shareHtmlAsPdf(html, `purchase-order-${supplier.id.slice(0, 8)}.pdf`, {
+        dialogTitle: 'Share Purchase Order',
+      });
     } catch (e) {
       console.error(e);
       Alert.alert('Error', 'Failed to generate or share PDF.');

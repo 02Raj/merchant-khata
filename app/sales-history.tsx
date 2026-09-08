@@ -15,9 +15,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { safePrintAsync } from '@/lib/safePrint';
+import { shareHtmlAsPdf } from '@/lib/sharePdf';
 
 import { useAuth } from '@/context/AuthContext';
 import { Colors } from '@/lib/theme';
@@ -201,10 +200,9 @@ export default function SalesHistoryScreen() {
           gstin: businessInfo?.gstin,
           businessType: businessInfo?.business_type,
         });
-        const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await shareHtmlAsPdf(html, `bill-${detailSale.id.slice(0, 8)}.pdf`, {
+          dialogTitle: 'Share Receipt',
+        });
       }
     } catch (error: any) {
       Alert.alert('Print failed', error.message || 'Could not print bill');
@@ -361,49 +359,48 @@ export default function SalesHistoryScreen() {
               </TouchableOpacity>
             </ScrollView>
           ) : null}
-        </SafeAreaView>
-      </Modal>
-
-      <Modal visible={returnModalVisible} animationType="fade" transparent>
-        <View style={styles.returnOverlay}>
-          <View style={styles.returnSheet}>
-            <Text style={styles.returnTitle}>Return Items</Text>
-            <ScrollView style={{ maxHeight: 320 }}>
-              {detailItems.map((item) => {
-                const remaining = item.quantity - item.returned_quantity;
-                if (remaining <= 0) return null;
-                return (
-                  <View key={item.id} style={styles.returnItemRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemName}>{item.product_name}</Text>
-                      <Text style={styles.itemMeta}>Max return: {remaining}</Text>
-                    </View>
-                    <TextInput
-                      style={styles.returnQtyInput}
-                      value={returnQtyByItem[item.id] || ''}
-                      onChangeText={(text) => setReturnQtyByItem((prev) => ({ ...prev, [item.id]: text }))}
-                      keyboardType="decimal-pad"
-                      placeholder="0"
-                      placeholderTextColor={Colors.textSecondary}
-                    />
-                  </View>
-                );
-              })}
-            </ScrollView>
-            <View style={styles.returnActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setReturnModalVisible(false)}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionBtn} onPress={() => void submitReturn()} disabled={processingReturn}>
-                {processingReturn ? (
-                  <ActivityIndicator color={Colors.bg} />
-                ) : (
-                  <Text style={styles.actionBtnText}>Confirm Return</Text>
-                )}
-              </TouchableOpacity>
+          {returnModalVisible && (
+            <View style={[StyleSheet.absoluteFill, styles.returnOverlay]}>
+              <View style={styles.returnSheet}>
+                <Text style={styles.returnTitle}>Return Items</Text>
+                <ScrollView style={{ maxHeight: 320 }}>
+                  {detailItems.map((item) => {
+                    const remaining = item.quantity - item.returned_quantity;
+                    if (remaining <= 0) return null;
+                    return (
+                      <View key={item.id} style={styles.returnItemRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.itemName}>{item.product_name}</Text>
+                          <Text style={styles.itemMeta}>Max return: {remaining}</Text>
+                        </View>
+                        <TextInput
+                          style={styles.returnQtyInput}
+                          value={returnQtyByItem[item.id] || ''}
+                          onChangeText={(text) => setReturnQtyByItem((prev) => ({ ...prev, [item.id]: text }))}
+                          keyboardType="decimal-pad"
+                          placeholder="0"
+                          placeholderTextColor={Colors.textSecondary}
+                        />
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+                <View style={styles.returnActions}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setReturnModalVisible(false)}>
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => void submitReturn()} disabled={processingReturn}>
+                    {processingReturn ? (
+                      <ActivityIndicator color={Colors.bg} />
+                    ) : (
+                      <Text style={styles.actionBtnText}>Confirm Return</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-          </View>
-        </View>
+          )}
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
