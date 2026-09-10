@@ -156,7 +156,11 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   loadingContainer: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: Colors.surface,
