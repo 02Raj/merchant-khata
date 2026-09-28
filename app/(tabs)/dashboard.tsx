@@ -15,6 +15,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { businessInfo } = useAuth();
   const isRestaurant = businessInfo?.business_type === 'restaurant';
+  const isWholesale = businessInfo?.business_type === 'wholesale' || businessInfo?.business_type === 'both';
 
   const { data: metrics, isLoading: loading, refetch } = useDashboardMetrics(businessInfo?.id);
 
@@ -160,6 +161,41 @@ export default function DashboardScreen() {
               </View>
               )}
             </View>
+
+            {isWholesale && metrics?.topReceivables?.length ? (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <Text style={[styles.sectionTitle, { marginBottom: 2 }]}>Collect first</Text>
+                    <Text style={styles.sectionHint}>Highest outstanding parties</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => router.push('/(tabs)/customers')}>
+                    <Text style={styles.seeAllText}>View khata</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.collectionList}>
+                  {metrics.topReceivables.map((party, index) => (
+                    <TouchableOpacity
+                      key={party.id}
+                      style={[styles.collectionRow, index === metrics.topReceivables.length - 1 && styles.collectionRowLast]}
+                      onPress={() => router.push('/(tabs)/customers')}
+                      activeOpacity={0.75}
+                    >
+                      <View style={styles.collectionRank}><Text style={styles.collectionRankText}>{index + 1}</Text></View>
+                      <View style={styles.collectionParty}>
+                        <Text style={styles.collectionName} numberOfLines={1}>{party.name}</Text>
+                        <Text style={styles.collectionPhone}>{party.phone === 'N/A' ? 'No phone added' : party.phone}</Text>
+                      </View>
+                      <View style={styles.collectionAmountWrap}>
+                        <Text style={styles.collectionAmount}>₹ {party.balance.toLocaleString('en-IN')}</Text>
+                        <Text style={styles.collectionDue}>due</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ) : null}
 
             {/* Quick Actions */}
             <View style={styles.section}>
@@ -475,6 +511,18 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginBottom: 16,
   },
+  sectionHint: { color: Colors.textSecondary, fontSize: 12 },
+  collectionList: { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
+  collectionRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: Colors.hairline },
+  collectionRowLast: { borderBottomWidth: 0 },
+  collectionRank: { width: 30, height: 30, borderRadius: 15, backgroundColor: Colors.warn + '22', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  collectionRankText: { color: Colors.warn, fontWeight: '700', fontSize: 13 },
+  collectionParty: { flex: 1, minWidth: 0 },
+  collectionName: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  collectionPhone: { color: Colors.textSecondary, fontSize: 12, marginTop: 3 },
+  collectionAmountWrap: { alignItems: 'flex-end', marginRight: 8 },
+  collectionAmount: { color: Colors.warn, fontSize: 15, fontWeight: '700' },
+  collectionDue: { color: Colors.textSecondary, fontSize: 11, marginTop: 2 },
   seeAllText: {
     color: Colors.accentInk,
     fontSize: 14,

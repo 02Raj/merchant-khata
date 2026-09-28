@@ -8,6 +8,7 @@ import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useTables } from '@/hooks/useMoreQueries';
 import * as Haptics from 'expo-haptics';
+import { formatOpenOrderAge } from '@/lib/restaurantHelpers';
 
 type Table = {
   id: string;
@@ -29,6 +30,9 @@ export default function TablesScreen() {
   const { data, isLoading: loading, refetch, isRefetching } = useTables(businessInfo?.id);
   const tables = data?.tables || [];
   const activeTakeaways = data?.takeaways || [];
+  const occupiedCount = tables.filter(table => table.orderStatus === 'open').length;
+  const billedCount = tables.filter(table => table.orderStatus === 'billed').length;
+  const freeCount = tables.length - occupiedCount - billedCount;
 
   // Add table modal
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -109,6 +113,14 @@ export default function TablesScreen() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} tintColor={Colors.accent} />}
       >
+        <View style={styles.floorSummary}>
+          <View style={styles.summaryItem}><Text style={styles.summaryValue}>{freeCount}</Text><Text style={styles.summaryLabel}>Free</Text></View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryItem}><Text style={[styles.summaryValue, { color: Colors.warn }]}>{occupiedCount}</Text><Text style={styles.summaryLabel}>Running</Text></View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryItem}><Text style={[styles.summaryValue, { color: Colors.accent }]}>{billedCount}</Text><Text style={styles.summaryLabel}>Payment due</Text></View>
+        </View>
+
         <View style={styles.takeawaySection}>
           <TouchableOpacity style={styles.takeawayButton} onPress={handleTakeaway}>
             <Ionicons name="cart" size={24} color={Colors.bg} />
@@ -125,8 +137,11 @@ export default function TablesScreen() {
                   onPress={() => router.push(`/kot/${order.id}`)}
                 >
                   <Ionicons name="bag" size={20} color={Colors.bg} />
-                  <Text style={styles.takeawayCardText}>Order #{order.id.substring(0,6)}</Text>
-                  <Text style={styles.takeawayCardStatus}>{order.status.toUpperCase()}</Text>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.takeawayCardText}>Parcel #{order.id.substring(0,6)}</Text>
+                    <Text style={styles.takeawayMeta}>₹ {Number(order.total_amount || 0).toLocaleString('en-IN')} · {formatOpenOrderAge(order.created_at)}</Text>
+                  </View>
+                  <Text style={styles.takeawayCardStatus}>{order.status === 'billed' ? 'PAYMENT' : 'OPEN'}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -156,7 +171,10 @@ export default function TablesScreen() {
                   <Ionicons name={isOccupied ? "restaurant" : "restaurant-outline"} size={20} color={isOccupied ? Colors.bg : Colors.textSecondary} />
                 </View>
                 <View style={styles.tableFooter}>
-                  <Text style={[styles.tableStatus, isOccupied ? styles.textDark : styles.textLight]}>{statusText}</Text>
+                  <View>
+                    <Text style={[styles.tableStatus, isOccupied ? styles.textDark : styles.textLight]}>{statusText}</Text>
+                    {isOccupied ? <Text style={styles.tableAge}>{formatOpenOrderAge(table.orderCreatedAt)}</Text> : null}
+                  </View>
                   {isOccupied && (
                     <Text style={styles.tableAmount}>₹ {table.orderAmount}</Text>
                   )}
@@ -238,6 +256,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 20,
   },
+  floorSummary: { flexDirection: 'row', backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingVertical: 12, marginBottom: 16 },
+  summaryItem: { flex: 1, alignItems: 'center' },
+  summaryValue: { color: Colors.ok, fontSize: 20, fontWeight: '800' },
+  summaryLabel: { color: Colors.textSecondary, fontSize: 11, marginTop: 2 },
+  summaryDivider: { width: 1, backgroundColor: Colors.border },
   takeawaySection: {
     marginBottom: 24,
   },
@@ -274,9 +297,8 @@ const styles = StyleSheet.create({
   takeawayCardText: {
     color: Colors.bg,
     fontWeight: 'bold',
-    marginLeft: 12,
-    flex: 1,
   },
+  takeawayMeta: { color: Colors.bg, fontSize: 12, opacity: 0.8, marginTop: 3 },
   takeawayCardStatus: {
     color: Colors.bg,
     fontWeight: 'bold',
@@ -327,6 +349,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
+  tableAge: { color: Colors.bg, fontSize: 11, fontWeight: '600', marginTop: 2, opacity: 0.8 },
   tableAmount: {
     fontSize: 14,
     fontWeight: 'bold',

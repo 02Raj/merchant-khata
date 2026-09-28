@@ -577,7 +577,7 @@ export default function SalesScreen() {
       const { data, error: rpcError } = await supabase.rpc('process_checkout', {
         p_business_id: businessInfo!.id,
         p_customer_id: selectedCustomer?.id || null,
-        p_created_by: createdByActor(session?.uid, activeStaff),
+        p_created_by: createdByActor(session?.id, activeStaff),
         p_payment_type: resolvedType,
         p_total_amount: payableTotal,
         p_total_tax: cartTotals.taxTotal,
@@ -1019,9 +1019,15 @@ export default function SalesScreen() {
                 <View style={styles.customerAvatar}>
                   <Text style={styles.customerAvatarText}>{item.name.charAt(0).toUpperCase()}</Text>
                 </View>
-                <View>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.customerRowName}>{item.name}</Text>
-                  <Text style={styles.customerRowType}>{customerTypeLabel(item.customer_type)}</Text>
+                  <Text style={styles.customerRowType}>
+                    {customerTypeLabel(item.customer_type)}{item.credit_limit ? ` · Limit ₹${item.credit_limit.toLocaleString('en-IN')}` : ''}
+                  </Text>
+                </View>
+                <View style={styles.partyDueWrap}>
+                  <Text style={[styles.partyDueAmount, item.balance <= 0 && { color: Colors.ok }]}>₹ {Math.max(0, item.balance).toLocaleString('en-IN')}</Text>
+                  <Text style={styles.partyDueLabel}>{item.balance > 0 ? 'due' : 'clear'}</Text>
                 </View>
               </TouchableOpacity>
             )}
@@ -1304,6 +1310,9 @@ const styles = StyleSheet.create({
   customerRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
   customerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.accent, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   customerAvatarText: { color: Colors.bg, fontSize: 18, fontWeight: '600' },
+  partyDueWrap: { alignItems: 'flex-end', marginLeft: 8 },
+  partyDueAmount: { color: Colors.warn, fontSize: 14, fontWeight: '700' },
+  partyDueLabel: { color: Colors.textSecondary, fontSize: 11, marginTop: 2 },
   customerRowName: { fontSize: 16, fontWeight: '500', color: Colors.textPrimary },
   customerRowType: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   emptyCustomerContainer: { padding: 32, alignItems: 'center' },

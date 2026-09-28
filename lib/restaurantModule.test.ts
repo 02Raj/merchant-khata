@@ -97,6 +97,15 @@ describe('Restaurant Module — Tables & KOT (F2)', () => {
     const safePrint = read('lib/safePrint.ts');
     expect(safePrint).toContain("'cancelled'");
   });
+
+  it('F2.7 — phone KOT uses clear Menu / Order panes', () => {
+    const src = read('app/kot/[id].tsx');
+    expect(src).toContain('useWindowDimensions');
+    expect(src).toContain("width < 700");
+    expect(src).toContain("setMobilePane('menu')");
+    expect(src).toContain("setMobilePane('order')");
+    expect(src).toContain('Send to kitchen');
+  });
 });
 
 describe('Restaurant Module — Menu / Variants / Modifiers (F3)', () => {
@@ -208,6 +217,14 @@ describe('Restaurant Module — Billing & Daybook (F5)', () => {
     const src = read('app/kot/[id].tsx');
     expect(src).toContain('payment_type: \'cash\'');
     expect(src).toContain('payment_type: \'upi\'');
+  });
+
+  it('F5.3 — payment method must be chosen explicitly', () => {
+    const src = read('app/kot/[id].tsx');
+    expect(src).toContain("useState<'cash' | 'upi' | 'split' | null>(null)");
+    expect(src).toContain("choosePaymentMethod('cash')");
+    expect(src).toContain("choosePaymentMethod('upi')");
+    expect(src).toContain('Cash + UPI must exactly match the bill total.');
   });
 });
 

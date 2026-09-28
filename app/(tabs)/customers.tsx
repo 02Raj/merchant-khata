@@ -42,6 +42,7 @@ export default function CustomersScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [balanceFilter, setBalanceFilter] = useState<'all' | 'due' | 'clear'>('all');
 
   // Add Customer Modal
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -289,10 +290,15 @@ export default function CustomersScreen() {
     });
   };
 
-  const filteredCustomers = customers.filter(c =>
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    c.phone.includes(searchQuery)
-  );
+  const filteredCustomers = customers
+    .filter(c =>
+      (c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery)) &&
+      (balanceFilter === 'all' || (balanceFilter === 'due' ? c.balance > 0 : c.balance <= 0))
+    )
+    .sort((a, b) => {
+      if (balanceFilter === 'due') return b.balance - a.balance;
+      return a.name.localeCompare(b.name);
+    });
 
   const totalReceivables = customers.reduce((sum, c) => c.balance > 0 ? sum + c.balance : sum, 0);
 
@@ -323,6 +329,22 @@ export default function CustomersScreen() {
             <Ionicons name="close-circle" size={20} color={Colors.textSecondary} />
           </TouchableOpacity>
         )}
+      </View>
+
+      <View style={styles.filterRow}>
+        {([
+          ['all', `All ${customers.length}`],
+          ['due', `Due ${customers.filter(c => c.balance > 0).length}`],
+          ['clear', 'Clear'],
+        ] as const).map(([value, label]) => (
+          <TouchableOpacity
+            key={value}
+            style={[styles.filterChip, balanceFilter === value && styles.filterChipActive]}
+            onPress={() => setBalanceFilter(value)}
+          >
+            <Text style={[styles.filterChipText, balanceFilter === value && styles.filterChipTextActive]}>{label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {loading ? (
@@ -359,7 +381,7 @@ export default function CustomersScreen() {
                 {item.balance > 0 ? (
                   <>
                     <Text style={styles.balanceAmountRed}>₹ {item.balance.toLocaleString('en-IN')}</Text>
-                    <Text style={styles.balanceLabel}>You'll Give</Text>
+                    <Text style={styles.balanceLabel}>Party owes you</Text>
                   </>
                 ) : item.balance < 0 ? (
                   <>
@@ -637,6 +659,11 @@ const styles = StyleSheet.create({
   
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface, marginHorizontal: 20, marginBottom: 16, paddingHorizontal: 16, height: 48, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 15, color: Colors.textPrimary },
+  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, marginBottom: 14 },
+  filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
+  filterChipActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  filterChipText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  filterChipTextActive: { color: Colors.bg },
   
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { paddingHorizontal: 20, paddingBottom: 40 },

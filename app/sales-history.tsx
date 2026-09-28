@@ -211,7 +211,7 @@ export default function SalesHistoryScreen() {
   };
 
   const submitReturn = async () => {
-    if (!detailSale || !businessInfo?.id || !session?.uid) return;
+    if (!detailSale || !businessInfo?.id || !session?.id) return;
 
     const items = detailItems
       .map((item) => ({
@@ -230,7 +230,7 @@ export default function SalesHistoryScreen() {
       const { error } = await supabase.rpc('process_sale_return', {
         p_business_id: businessInfo.id,
         p_sale_id: detailSale.id,
-        p_created_by: createdByActor(session.uid, activeStaff),
+        p_created_by: createdByActor(session.id, activeStaff),
         p_items: items,
       });
       if (error) throw error;

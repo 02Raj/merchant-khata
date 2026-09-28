@@ -9,7 +9,7 @@ export function useTables(businessId?: string) {
 
       const [tablesRes, ordersRes] = await Promise.all([
         supabase.from('tables').select('*').eq('business_id', businessId).eq('is_active', true).order('name'),
-        supabase.from('orders').select('id, table_id, status, total_amount').eq('business_id', businessId).in('status', ['open', 'billed'])
+        supabase.from('orders').select('id, table_id, status, total_amount, created_at').eq('business_id', businessId).in('status', ['open', 'billed'])
       ]);
 
       if (tablesRes.error) throw tablesRes.error;
@@ -23,7 +23,8 @@ export function useTables(businessId?: string) {
           ...table,
           orderStatus: tableOrder?.status || 'empty',
           orderAmount: tableOrder?.total_amount || 0,
-          orderId: tableOrder?.id || null
+          orderId: tableOrder?.id || null,
+          orderCreatedAt: tableOrder?.created_at || null,
         };
       });
 

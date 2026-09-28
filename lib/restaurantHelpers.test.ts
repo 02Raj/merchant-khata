@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   buildRawMaterialInsertPayload,
+  formatOpenOrderAge,
   isRestaurantBusiness,
   isRestaurantWaiter,
   normalizeRawMaterialUnit,
@@ -35,6 +36,13 @@ describe('restaurantHelpers', () => {
     expect(normalizeRawMaterialUnit('ltr')).toBe('ltr');
     expect(normalizeRawMaterialUnit('cup')).toBe('g');
     expect(RAW_MATERIAL_UNITS).toHaveLength(5);
+  });
+
+  it('formats live order age for quick floor scanning', () => {
+    const now = new Date('2026-09-28T12:00:00.000Z').getTime();
+    expect(formatOpenOrderAge('2026-09-28T11:42:00.000Z', now)).toBe('18m');
+    expect(formatOpenOrderAge('2026-09-28T10:35:00.000Z', now)).toBe('1h 25m');
+    expect(formatOpenOrderAge(null, now)).toBe('');
   });
 
   it('builds insert payload', () => {

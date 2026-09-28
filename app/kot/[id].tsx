@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert, Modal, ScrollView, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert, Modal, ScrollView, TextInput, KeyboardAvoidingView, Platform, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -67,6 +67,8 @@ type Order = {
 
 export default function KOTScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isCompact = width < 700;
   const params = useLocalSearchParams();
   const { businessInfo, session, activeStaff } = useAuth();
   const role = businessInfo?.role;
@@ -86,6 +88,8 @@ export default function KOTScreen() {
   
   // Menu Data
   const [products, setProducts] = useState<Product[]>([]);
+  const [menuSearch, setMenuSearch] = useState('');
+  const [mobilePane, setMobilePane] = useState<'menu' | 'order'>('menu');
   const [variants, setVariants] = useState<Variant[]>([]);
   const [modifiers, setModifiers] = useState<Modifier[]>([]);
   
@@ -105,6 +109,7 @@ export default function KOTScreen() {
   const [billModalVisible, setBillModalVisible] = useState(false);
   const [cashAmount, setCashAmount] = useState('');
   const [upiAmount, setUpiAmount] = useState('');
+  const [paymentChoice, setPaymentChoice] = useState<'cash' | 'upi' | 'split' | null>(null);
   const [processingBill, setProcessingBill] = useState(false);
 
   const [cancelModalVisible, setCancelModalVisible] = useState(false);
@@ -280,7 +285,7 @@ export default function KOTScreen() {
           type: orderType,
           status: 'open',
           kot_count: newKotCount,
-          waiter_id: session?.uid
+          waiter_id: session?.id
         }).select().single();
         if (error) throw error;
         currentOrderId = newOrder.id;
@@ -369,7 +374,7 @@ export default function KOTScreen() {
         order_item_id: cancelTargetItem.id,
         reason: cancelReason.trim(),
         status: 'pending',
-        requested_by: session?.uid,
+        requested_by: session?.id,
       }).select().single();
       if (error) throw error;
       setCancelRequests([...cancelRequests, data]);
@@ -404,7 +409,7 @@ export default function KOTScreen() {
                   order_item_id: item.id!,
                   reason: reason.trim(),
                   status: 'pending',
-                  requested_by: session?.uid,
+                  requested_by: session?.id,
                 }).select().single();
                 if (error) throw error;
                 setCancelRequests([...cancelRequests, data]);
@@ -436,7 +441,7 @@ export default function KOTScreen() {
       // Update request status
       await supabase.from('cancel_requests').update({ 
         status: 'approved', 
-        approved_by: session?.uid 
+        approved_by: session?.id
       }).eq('id', cr.id);
 
       if (order?.id) {
@@ -461,7 +466,7 @@ export default function KOTScreen() {
       setLoading(true);
       await supabase.from('cancel_requests').update({ 
         status: 'rejected', 
-        approved_by: session?.uid 
+        approved_by: session?.id
       }).eq('id', cr.id);
       
       setCancelRequests(cancelRequests.filter(r => r.id !== cr.id));
@@ -615,8 +620,23 @@ export default function KOTScreen() {
 
   const openSettleModal = () => {
     setCashAmount('');
-    setUpiAmount(billableGrandTotal.toFixed(2));
+    setUpiAmount('');
+    setPaymentChoice(null);
     setBillModalVisible(true);
+  };
+
+  const choosePaymentMethod = (method: 'cash' | 'upi' | 'split') => {
+    setPaymentChoice(method);
+    if (method === 'cash') {
+      setCashAmount(billableGrandTotal.toFixed(2));
+      setUpiAmount('');
+    } else if (method === 'upi') {
+      setCashAmount('');
+      setUpiAmount(billableGrandTotal.toFixed(2));
+    } else {
+      setCashAmount('');
+      setUpiAmount('');
+    }
   };
 
   const settlePayment = async () => {
@@ -628,6 +648,10 @@ export default function KOTScreen() {
 
     if (totalPaid < expected) {
       Alert.alert('Error', 'Payment is less than total bill amount.');
+      return;
+    }
+    if (totalPaid > expected) {
+      Alert.alert('Check amount', 'Cash + UPI must exactly match the bill total.');
       return;
     }
 
@@ -646,7 +670,7 @@ export default function KOTScreen() {
       if (cash > 0) {
         salesEntries.push({
           business_id: businessInfo!.id,
-          created_by: createdByActor(session?.uid, activeStaff),
+          created_by: createdByActor(session?.id, activeStaff),
           total_amount: cash,
           payment_type: 'cash'
         });
@@ -654,7 +678,7 @@ export default function KOTScreen() {
       if (upi > 0) {
         salesEntries.push({
           business_id: businessInfo!.id,
-          created_by: createdByActor(session?.uid, activeStaff),
+          created_by: createdByActor(session?.id, activeStaff),
           total_amount: upi,
           payment_type: 'upi'
         });
@@ -681,6 +705,12 @@ export default function KOTScreen() {
   }
 
   const pendingCount = items.filter(i => i.status === 'pending').length;
+  const visibleProducts = useMemo(() => {
+    const query = menuSearch.trim().toLowerCase();
+    return products
+      .filter(product => !query || product.name.toLowerCase().includes(query))
+      .sort((a, b) => Number(b.is_available_today) - Number(a.is_available_today) || a.name.localeCompare(b.name));
+  }, [menuSearch, products]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -700,14 +730,46 @@ export default function KOTScreen() {
         <Text style={styles.totalText}>₹{grandTotal.toFixed(2)}</Text>
       </View>
 
-      <View style={styles.body}>
+      {isCompact ? (
+        <View style={styles.mobilePaneTabs}>
+          <TouchableOpacity style={[styles.mobilePaneTab, mobilePane === 'menu' && styles.mobilePaneTabActive]} onPress={() => setMobilePane('menu')}>
+            <Ionicons name="restaurant-outline" size={18} color={mobilePane === 'menu' ? Colors.bg : Colors.textSecondary} />
+            <Text style={[styles.mobilePaneTabText, mobilePane === 'menu' && styles.mobilePaneTabTextActive]}>Menu</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.mobilePaneTab, mobilePane === 'order' && styles.mobilePaneTabActive]} onPress={() => setMobilePane('order')}>
+            <Ionicons name="receipt-outline" size={18} color={mobilePane === 'order' ? Colors.bg : Colors.textSecondary} />
+            <Text style={[styles.mobilePaneTabText, mobilePane === 'order' && styles.mobilePaneTabTextActive]}>Order ({items.filter(i => i.status !== 'cancelled').length})</Text>
+            {pendingCount > 0 ? <View style={styles.pendingDot} /> : null}
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <View style={[styles.body, isCompact && styles.bodyCompact]}>
         {/* Left Side: Menu (Products) */}
-        <View style={styles.menuContainer}>
+        <View style={[styles.menuContainer, isCompact && styles.mobilePane, isCompact && mobilePane !== 'menu' && styles.paneHidden]}>
           <Text style={styles.sectionTitle}>Menu</Text>
+          <View style={styles.menuSearchBox}>
+            <Ionicons name="search" size={18} color={Colors.textSecondary} />
+            <TextInput
+              style={styles.menuSearchInput}
+              value={menuSearch}
+              onChangeText={setMenuSearch}
+              placeholder="Search dish"
+              placeholderTextColor={Colors.textSecondary}
+              autoCorrect={false}
+            />
+            {menuSearch ? (
+              <TouchableOpacity onPress={() => setMenuSearch('')}>
+                <Ionicons name="close-circle" size={18} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
           <FlatList
-            data={products}
+            data={visibleProducts}
             keyExtractor={p => p.id}
             numColumns={2}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={<Text style={styles.emptyMenuText}>No matching dish</Text>}
             renderItem={({item}) => (
               <TouchableOpacity 
                 style={[styles.productCard, !item.is_available_today && styles.productDisabled]}
@@ -715,14 +777,14 @@ export default function KOTScreen() {
               >
                 <Text style={styles.productName}>{item.name}</Text>
                 <Text style={styles.productPrice}>₹{item.sale_price}</Text>
-                {!item.is_available_today && <Text style={styles.outOfStock}>86'd</Text>}
+                {!item.is_available_today && <Text style={styles.outOfStock}>Unavailable today</Text>}
               </TouchableOpacity>
             )}
           />
         </View>
 
         {/* Right Side: Current KOT items */}
-        <View style={styles.cartContainer}>
+        <View style={[styles.cartContainer, isCompact && styles.mobilePane, isCompact && mobilePane !== 'order' && styles.paneHidden]}>
           <Text style={styles.sectionTitle}>Order Items</Text>
           <ScrollView>
             {items.map((item, idx) => {
@@ -746,7 +808,7 @@ export default function KOTScreen() {
                   
                   <View style={styles.cartItemRow}>
                     <Text style={[styles.statusBadge, item.status === 'sent' ? styles.badgeSent : item.status === 'cancelled' ? { backgroundColor: Colors.warn } : styles.badgePending]}>
-                      {item.status.toUpperCase()}
+                      {item.status === 'pending' ? 'NOT SENT' : item.status === 'sent' ? 'SENT TO KITCHEN' : 'CANCELLED'}
                     </Text>
 
                     {/* Waiter: Request Cancel */}
@@ -780,7 +842,7 @@ export default function KOTScreen() {
               );
             })}
             {items.length === 0 && (
-              <Text style={styles.emptyCartText}>No items added yet</Text>
+              <Text style={styles.emptyCartText}>Tap Menu, then tap a dish to add it</Text>
             )}
           </ScrollView>
 
@@ -792,7 +854,7 @@ export default function KOTScreen() {
                 onPress={sendKOT}
                 disabled={pendingCount === 0 || loading}
               >
-                {loading ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.btnText}>Send KOT ({pendingCount})</Text>}
+                {loading ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.btnText}>Send to kitchen ({pendingCount})</Text>}
               </TouchableOpacity>
             )}
 
@@ -915,6 +977,21 @@ export default function KOTScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Settle Payment</Text>
             <Text style={styles.totalPayText}>Total: ₹{billableGrandTotal.toFixed(2)}</Text>
+            <Text style={styles.modalSub}>How did the customer pay?</Text>
+            <View style={styles.paymentChoices}>
+              <TouchableOpacity style={[styles.paymentChoice, paymentChoice === 'cash' && styles.paymentChoiceActive]} onPress={() => choosePaymentMethod('cash')}>
+                <Ionicons name="cash-outline" size={20} color={Colors.textPrimary} />
+                <Text style={styles.paymentChoiceText}>Cash</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.paymentChoice, paymentChoice === 'upi' && styles.paymentChoiceActive]} onPress={() => choosePaymentMethod('upi')}>
+                <Ionicons name="qr-code-outline" size={20} color={Colors.textPrimary} />
+                <Text style={styles.paymentChoiceText}>UPI</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.paymentChoice, paymentChoice === 'split' && styles.paymentChoiceActive]} onPress={() => choosePaymentMethod('split')}>
+                <Ionicons name="git-branch-outline" size={20} color={Colors.textPrimary} />
+                <Text style={styles.paymentChoiceText}>Split</Text>
+              </TouchableOpacity>
+            </View>
             
             <Text style={styles.modalSub}>Cash Amount</Text>
             <TextInput style={styles.notesInput} keyboardType="numeric" placeholder="₹0.00" placeholderTextColor={Colors.textSecondary} value={cashAmount} onChangeText={setCashAmount} />
@@ -982,8 +1059,20 @@ const styles = StyleSheet.create({
   headerSub: { fontSize: 12, color: Colors.textSecondary },
   totalText: { fontSize: 24, fontWeight: 'bold', color: Colors.accent },
   body: { flex: 1, flexDirection: 'row' },
+  bodyCompact: { flexDirection: 'column' },
+  mobilePaneTabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: Colors.bg, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  mobilePaneTab: { flex: 1, height: 44, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  mobilePaneTabActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  mobilePaneTabText: { color: Colors.textSecondary, fontWeight: '700', fontSize: 14 },
+  mobilePaneTabTextActive: { color: Colors.bg },
+  pendingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.warn },
+  mobilePane: { flex: 1, width: '100%', borderRightWidth: 0 },
+  paneHidden: { display: 'none' },
   
   menuContainer: { flex: 2, borderRightWidth: 1, borderRightColor: Colors.border, padding: 8 },
+  menuSearchBox: { height: 42, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 10, paddingHorizontal: 10, marginBottom: 10 },
+  menuSearchInput: { flex: 1, color: Colors.textPrimary, fontSize: 14, paddingVertical: 0 },
+  emptyMenuText: { color: Colors.textSecondary, textAlign: 'center', paddingVertical: 24 },
   cartContainer: { flex: 1, padding: 8, backgroundColor: Colors.surfaceRaised },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: Colors.textSecondary, marginBottom: 12, marginLeft: 4 },
   
@@ -1061,4 +1150,8 @@ const styles = StyleSheet.create({
   addBtn: { backgroundColor: Colors.accent, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 8 },
   addBtnText: { color: Colors.bg, fontSize: 16, fontWeight: 'bold' },
   totalPayText: { fontSize: 24, fontWeight: 'bold', color: Colors.textPrimary, marginBottom: 16 },
+  paymentChoices: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  paymentChoice: { flex: 1, minHeight: 52, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  paymentChoiceActive: { borderColor: Colors.accent, backgroundColor: Colors.accentDim },
+  paymentChoiceText: { color: Colors.textPrimary, fontSize: 12, fontWeight: '700' },
 });

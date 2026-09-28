@@ -58,6 +58,27 @@ export function useDashboardMetrics(businessId?: string) {
         }
       });
 
+      // Keep Home focused on the three collection calls that matter most today.
+      const dueCustomerIds = Object.entries(balances)
+        .filter(([, balance]) => balance > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([customerId]) => customerId);
+
+      let topReceivables: Array<{ id: string; name: string; phone: string; balance: number }> = [];
+      if (dueCustomerIds.length > 0) {
+        const { data: dueCustomers, error: dueCustomersError } = await supabase
+          .from('customers')
+          .select('id, name, phone')
+          .eq('business_id', businessId)
+          .in('id', dueCustomerIds);
+
+        if (dueCustomersError) throw dueCustomersError;
+        topReceivables = (dueCustomers || [])
+          .map(customer => ({ ...customer, balance: balances[customer.id] || 0 }))
+          .sort((a, b) => b.balance - a.balance);
+      }
+
       // 3. Fetch Low Stock
       const { data: productsData, error: productsError } = await supabase
         .from('products')
@@ -126,6 +147,7 @@ export function useDashboardMetrics(businessId?: string) {
         salesCount,
         receivables,
         receivablesCount,
+        topReceivables,
         lowStockCount,
         recentActivity: combined.slice(0, 5)
       };

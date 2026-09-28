@@ -244,7 +244,7 @@ export default function SuppliersScreen() {
       const { error } = await supabase.rpc('record_supplier_purchase', {
         p_business_id: businessInfo!.id,
         p_supplier_id: selectedSupplier!.id,
-        p_created_by: createdByActor(session?.uid, activeStaff),
+        p_created_by: createdByActor(session?.id, activeStaff),
         p_total_amount: amount,
         p_items: items,
       });

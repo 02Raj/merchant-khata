@@ -16,6 +16,18 @@ export function isRestaurantWaiter(role?: string | null, businessType?: string |
   return role === 'waiter' && businessType === 'restaurant';
 }
 
+/** Short, glanceable age for live table and parcel cards. */
+export function formatOpenOrderAge(createdAt?: string | null, nowMs = Date.now()): string {
+  if (!createdAt) return '';
+  const createdMs = new Date(createdAt).getTime();
+  if (!Number.isFinite(createdMs)) return '';
+  const minutes = Math.max(0, Math.floor((nowMs - createdMs) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
 export function validateRawMaterialName(name: string): string | null {
   if (!name.trim()) return 'Material name is required.';
   return null;
