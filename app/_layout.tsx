@@ -49,7 +49,7 @@ function RootNavigator() {
     if (!session) {
       const onAuthEntry =
         group === '(auth)' &&
-        (screenName === 'login' || screenName === 'otp' || screenName === 'signup');
+        (screenName === 'login' || screenName === 'otp' || screenName === 'signup' || screenName === 'reset-password');
       if (!onAuthEntry) {
         router.replace('/(auth)/login');
       }
@@ -64,6 +64,10 @@ function RootNavigator() {
     }
 
     if (group === '(auth)' && screenName === 'staff-pin') {
+      return;
+    }
+
+    if (group === '(auth)' && screenName === 'reset-password') {
       return;
     }
 

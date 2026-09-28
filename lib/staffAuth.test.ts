@@ -43,6 +43,22 @@ describe('email_pin auth mode', () => {
     expect(auth).toContain('signUpOwnerWithEmail');
   });
 
+  it('supports forgot and change password without SMS', () => {
+    const auth = fs.readFileSync(path.join(ROOT, 'lib/auth.ts'), 'utf8');
+    const login = fs.readFileSync(path.join(ROOT, 'app/(auth)/login.tsx'), 'utf8');
+    const reset = fs.readFileSync(path.join(ROOT, 'app/(auth)/reset-password.tsx'), 'utf8');
+    const settings = fs.readFileSync(path.join(ROOT, 'app/settings.tsx'), 'utf8');
+    const rootLayout = fs.readFileSync(path.join(ROOT, 'app/_layout.tsx'), 'utf8');
+
+    expect(auth).toContain('resetPasswordForEmail');
+    expect(auth).toContain('exchangeCodeForSession');
+    expect(auth).toContain("updateUser({ password })");
+    expect(login).toContain('Send reset link');
+    expect(reset).toContain('Save new password');
+    expect(settings).toContain('Change password');
+    expect(rootLayout).toContain("screenName === 'reset-password'");
+  });
+
 describe('staff PIN helpers', () => {
   it('rejects blank name and weak PINs', () => {
     expect(validateStaffName('')).not.toBeNull();

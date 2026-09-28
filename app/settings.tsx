@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, TextInput, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, TextInput, Modal, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -17,6 +17,7 @@ import {
   setStaffActive,
   type StaffRow,
 } from '@/lib/staffAuth';
+import { authErrorMessage, updateOwnerPassword, validateOwnerPassword } from '@/lib/auth';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -27,6 +28,11 @@ export default function SettingsScreen() {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [passwordModal, setPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [staffRows, setStaffRows] = useState<StaffRow[]>([]);
   const [staffModal, setStaffModal] = useState(false);
   const [staffName, setStaffName] = useState('');
@@ -173,6 +179,39 @@ export default function SettingsScreen() {
     );
   };
 
+  const closePasswordModal = () => {
+    setPasswordModal(false);
+    setNewPassword('');
+    setConfirmPassword('');
+    setShowPassword(false);
+    setPasswordError(null);
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordError(null);
+    const validationError = validateOwnerPassword(newPassword);
+    if (validationError) {
+      setPasswordError(validationError);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await updateOwnerPassword(newPassword);
+      closePasswordModal();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Password changed', 'Use your new password the next time you log in.');
+    } catch (error) {
+      setPasswordError(authErrorMessage(error, 'Could not change password. Try again.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -220,6 +259,15 @@ export default function SettingsScreen() {
                 >
                   <Ionicons name="person-outline" size={20} color={Colors.accent} />
                   <Text style={styles.actionBtnText}>Back to owner</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+            {isOwnerAccount && !activeStaff ? (
+              <>
+                <View style={styles.divider} />
+                <TouchableOpacity style={styles.actionBtn} onPress={() => setPasswordModal(true)}>
+                  <Ionicons name="lock-closed-outline" size={20} color={Colors.accent} />
+                  <Text style={styles.actionBtnText}>Change password</Text>
                 </TouchableOpacity>
               </>
             ) : null}
@@ -360,6 +408,56 @@ export default function SettingsScreen() {
 
       </ScrollView>
 
+      <Modal visible={passwordModal} animationType="slide" transparent onRequestClose={closePasswordModal}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.passwordModalCard}>
+            <View style={styles.passwordModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.passwordModalTitle}>Change password</Text>
+                <Text style={styles.settingDesc}>Use at least 8 characters and one number.</Text>
+              </View>
+              <TouchableOpacity style={styles.modalClose} onPress={closePasswordModal}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.passwordLabel}>New password</Text>
+            <View style={styles.passwordInputRow}>
+              <TextInput
+                style={styles.passwordInput}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry={!showPassword}
+                autoComplete="new-password"
+                placeholder="Minimum 8 characters"
+                placeholderTextColor={Colors.textSecondary}
+              />
+              <TouchableOpacity style={styles.passwordEye} onPress={() => setShowPassword(value => !value)} accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.passwordLabel}>Confirm password</Text>
+            <View style={styles.passwordInputRow}>
+              <TextInput
+                style={styles.passwordInput}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry={!showPassword}
+                autoComplete="new-password"
+                placeholder="Type password again"
+                placeholderTextColor={Colors.textSecondary}
+              />
+            </View>
+
+            {passwordError ? <View style={styles.passwordError}><Text style={styles.passwordErrorText}>{passwordError}</Text></View> : null}
+            <TouchableOpacity style={[styles.passwordSave, saving && { opacity: 0.6 }]} onPress={handleChangePassword} disabled={saving}>
+              {saving ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.passwordSaveText}>Save new password</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <Modal visible={staffModal} animationType="slide" transparent>
         <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <View style={{ backgroundColor: Colors.bg, padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
@@ -470,4 +568,17 @@ const styles = StyleSheet.create({
 
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)', gap: 8 },
   logoutText: { fontSize: 16, fontWeight: '600', color: Colors.warn },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  passwordModalCard: { backgroundColor: Colors.surfaceRaised, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 24, paddingBottom: Platform.OS === 'ios' ? 36 : 24 },
+  passwordModalHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 20 },
+  passwordModalTitle: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700', marginBottom: 6 },
+  modalClose: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginTop: -8, marginRight: -8 },
+  passwordLabel: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600', marginBottom: 7, marginTop: 10 },
+  passwordInputRow: { height: 56, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: Colors.border, borderRadius: 10, backgroundColor: Colors.surface },
+  passwordInput: { flex: 1, height: '100%', paddingHorizontal: 16, color: Colors.textPrimary, fontSize: 16 },
+  passwordEye: { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
+  passwordError: { padding: 12, borderRadius: 8, backgroundColor: 'rgba(201, 162, 39, 0.15)', borderLeftWidth: 3, borderLeftColor: Colors.warn, marginTop: 14 },
+  passwordErrorText: { color: Colors.textPrimary, fontSize: 13 },
+  passwordSave: { height: 56, borderRadius: 10, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
+  passwordSaveText: { color: Colors.bg, fontSize: 16, fontWeight: '700' },
 });

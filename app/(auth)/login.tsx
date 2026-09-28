@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
@@ -30,6 +32,10 @@ function EmailLoginScreen() {
   const [tab, setTab] = useState<'owner' | 'staff'>('owner');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [resetModalVisible, setResetModalVisible] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetSent, setResetSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -54,17 +60,24 @@ function EmailLoginScreen() {
     }
   };
 
+  const openForgotPassword = () => {
+    setResetEmail(email.trim());
+    setResetSent(false);
+    setError(null);
+    setResetModalVisible(true);
+  };
+
   const onForgot = async () => {
     setError(null);
-    const emailError = validateOwnerEmail(email);
+    const emailError = validateOwnerEmail(resetEmail);
     if (emailError) {
-      setError('Enter your email first, then tap Forgot password.');
+      setError('Enter the email used for your owner account.');
       return;
     }
     setLoading(true);
     try {
-      await sendOwnerPasswordReset(email);
-      Alert.alert('Check email', 'Password reset link sent. Check spam too.');
+      await sendOwnerPasswordReset(resetEmail, Linking.createURL('/reset-password'));
+      setResetSent(true);
     } catch (err) {
       setError(authErrorMessage(err, 'Could not send reset email.'));
     } finally {
@@ -136,12 +149,15 @@ function EmailLoginScreen() {
                   style={styles.input}
                   value={password}
                   onChangeText={setPassword}
-                  secureTextEntry
+                  secureTextEntry={!showPassword}
                   autoComplete="password"
                   placeholder="••••••••"
                   placeholderTextColor={Colors.textSecondary}
                   editable={!loading}
                 />
+                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPassword(value => !value)} accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+                  <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color={Colors.textSecondary} />
+                </TouchableOpacity>
               </View>
 
               {error ? (
@@ -159,7 +175,7 @@ function EmailLoginScreen() {
                 {loading ? <ActivityIndicator color={Colors.bg} size="small" /> : <Text style={styles.buttonText}>Log in</Text>}
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={onForgot} disabled={loading} style={styles.linkBtn}>
+              <TouchableOpacity onPress={openForgotPassword} disabled={loading} style={styles.linkBtn}>
                 <Text style={styles.linkText}>Forgot password</Text>
               </TouchableOpacity>
 
@@ -196,6 +212,57 @@ function EmailLoginScreen() {
           )}
         </View>
       </KeyboardAvoidingView>
+
+      <Modal visible={resetModalVisible} animationType="slide" transparent onRequestClose={() => setResetModalVisible(false)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>{resetSent ? 'Check your email' : 'Reset password'}</Text>
+                <Text style={styles.modalSubtitle}>
+                  {resetSent ? 'Open the latest link we sent. Check spam if needed.' : 'We will email you a secure password reset link.'}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.closeButton} onPress={() => { setResetModalVisible(false); setError(null); }}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            {resetSent ? (
+              <>
+                <View style={styles.sentBox}>
+                  <Ionicons name="mail-outline" size={24} color={Colors.ok} />
+                  <Text style={styles.sentText}>Link sent to {resetEmail.trim()}</Text>
+                </View>
+                <TouchableOpacity style={styles.button} onPress={() => setResetModalVisible(false)}>
+                  <Text style={styles.buttonText}>Done</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.label}>Owner email</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    value={resetEmail}
+                    onChangeText={setResetEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    placeholder="owner@shop.com"
+                    placeholderTextColor={Colors.textSecondary}
+                    autoFocus
+                  />
+                </View>
+                {error ? <View style={styles.errorContainer}><Text style={styles.errorText}>{error}</Text></View> : null}
+                <TouchableOpacity style={[styles.button, loading && styles.buttonDisabled]} onPress={onForgot} disabled={loading}>
+                  {loading ? <ActivityIndicator color={Colors.bg} /> : <Text style={styles.buttonText}>Send reset link</Text>}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -247,6 +314,7 @@ const styles = StyleSheet.create({
     height: 56,
   },
   input: { flex: 1, color: Colors.textPrimary, fontSize: 16, paddingHorizontal: 16, height: '100%', fontWeight: '500' },
+  eyeButton: { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
   button: {
     backgroundColor: Colors.accent,
     height: 56,
@@ -269,4 +337,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   errorText: { color: Colors.textPrimary, fontSize: 13 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: Colors.surfaceRaised, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 24, paddingBottom: Platform.OS === 'ios' ? 36 : 24 },
+  modalHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 24 },
+  modalTitle: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700', marginBottom: 6 },
+  modalSubtitle: { color: Colors.textSecondary, fontSize: 14, lineHeight: 20 },
+  closeButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginTop: -8, marginRight: -8 },
+  sentBox: { minHeight: 64, borderRadius: 10, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  sentText: { flex: 1, color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
 });

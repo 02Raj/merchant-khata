@@ -23,8 +23,32 @@ export async function signInOwnerWithEmail(email: string, password: string) {
   return { session: data.user };
 }
 
-export async function sendOwnerPasswordReset(email: string) {
-  const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+export async function sendOwnerPasswordReset(email: string, redirectTo?: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), redirectTo ? { redirectTo } : undefined);
+  if (error) throw error;
+}
+
+export async function establishPasswordRecoverySession(url: string) {
+  const normalizedUrl = url.replace('#', '?');
+  const parsed = new URL(normalizedUrl);
+  const code = parsed.searchParams.get('code');
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) throw error;
+    return;
+  }
+
+  const accessToken = parsed.searchParams.get('access_token');
+  const refreshToken = parsed.searchParams.get('refresh_token');
+  if (!accessToken || !refreshToken) throw new Error('This reset link is invalid or has expired.');
+  const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+  if (error) throw error;
+}
+
+export async function updateOwnerPassword(password: string) {
+  const passwordError = validateOwnerPassword(password);
+  if (passwordError) throw new Error(passwordError);
+  const { error } = await supabase.auth.updateUser({ password });
   if (error) throw error;
 }
 
