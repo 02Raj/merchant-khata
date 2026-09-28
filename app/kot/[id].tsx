@@ -10,6 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { generateReceiptHTML, generateKOTHTML } from '@/lib/printTemplate';
 import { getPrinterPaperSize } from '@/lib/printerSettings';
 import { safePrintAsync } from '@/lib/safePrint';
+import { createdByActor } from '@/lib/staffPin';
 
 // Types
 type Product = {
@@ -67,7 +68,7 @@ type Order = {
 export default function KOTScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { businessInfo, session } = useAuth();
+  const { businessInfo, session, activeStaff } = useAuth();
   const role = businessInfo?.role;
   
   const isNew = params.id === 'new';
@@ -645,7 +646,7 @@ export default function KOTScreen() {
       if (cash > 0) {
         salesEntries.push({
           business_id: businessInfo!.id,
-          created_by: session?.uid,
+          created_by: createdByActor(session?.uid, activeStaff),
           total_amount: cash,
           payment_type: 'cash'
         });
@@ -653,7 +654,7 @@ export default function KOTScreen() {
       if (upi > 0) {
         salesEntries.push({
           business_id: businessInfo!.id,
-          created_by: session?.uid,
+          created_by: createdByActor(session?.uid, activeStaff),
           total_amount: upi,
           payment_type: 'upi'
         });

@@ -13,7 +13,6 @@ import * as Haptics from 'expo-haptics';
 import { validateWholesaleProductFields, validateWholesaleShopProduct } from '@/lib/wholesaleHelpers';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
-import { getFirebaseAuth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
 type Product = {

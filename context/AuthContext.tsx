@@ -1,88 +1,171 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { User } from 'firebase/auth';
-import { onAuthStateChanged } from 'firebase/auth';
+import type { User } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { userHasBusiness, type BusinessInfo } from '@/lib/auth';
-import { getFirebaseAuth } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
+import { overlayBusinessRole, type StaffProfile } from '@/lib/staffPin';
 
 type AuthSnapshot = {
   isReady: boolean;
   session: User | null;
   hasBusiness: boolean;
+  membership: BusinessInfo | null;
   businessInfo: BusinessInfo | null;
+  activeStaff: StaffProfile | null;
 };
 
 type AuthContextValue = AuthSnapshot & {
   refreshMembership: () => Promise<boolean>;
+  setActiveStaff: (staff: StaffProfile | null) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function staffStorageKey(uid: string, businessId: string) {
+  return `omnibill:activeStaff:${uid}:${businessId}`;
+}
+
+async function loadStoredStaff(uid: string, businessId: string): Promise<StaffProfile | null> {
+  try {
+    const raw = await AsyncStorage.getItem(staffStorageKey(uid, businessId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StaffProfile;
+    if (!parsed?.id || !parsed.role) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<AuthSnapshot>({
     isReady: false,
     session: null,
     hasBusiness: false,
+    membership: null,
     businessInfo: null,
+    activeStaff: null,
   });
 
   useEffect(() => {
     let alive = true;
-    let unsubscribe = () => {};
 
     try {
-      const firebaseAuth = getFirebaseAuth();
-      if (typeof firebaseAuth.onAuthStateChanged !== 'function') {
-        throw new Error('Firebase Auth did not initialize');
-      }
-
-      unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
-        let bizInfo: BusinessInfo | null = null;
-        if (user?.uid) {
-          try {
-            bizInfo = await userHasBusiness(user.uid);
-          } catch {
-            bizInfo = null;
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        async (_event, session) => {
+          const user = session?.user ?? null;
+          let membership: BusinessInfo | null = null;
+          let staff: StaffProfile | null = null;
+          
+          if (user?.id) {
+            try {
+              membership = await userHasBusiness(user.id);
+              if (membership?.id) {
+                staff = await loadStoredStaff(user.id, membership.id);
+              }
+            } catch {
+              membership = null;
+            }
           }
+          if (!alive) return;
+          setAuth({
+            isReady: true,
+            session: user,
+            hasBusiness: !!membership,
+            membership,
+            businessInfo: overlayBusinessRole(membership, staff),
+            activeStaff: staff,
+          });
         }
-        if (!alive) return;
+      );
+
+      return () => {
+        alive = false;
+        subscription.unsubscribe();
+      };
+    } catch (error) {
+      console.error('Supabase auth setup failed:', error);
+      if (alive) {
         setAuth({
           isReady: true,
-          session: user,
-          hasBusiness: !!bizInfo,
-          businessInfo: bizInfo,
+          session: null,
+          hasBusiness: false,
+          membership: null,
+          businessInfo: null,
+          activeStaff: null,
         });
-      });
-    } catch (error) {
-      console.error('Firebase auth setup failed:', error);
-      if (alive) {
-        setAuth({ isReady: true, session: null, hasBusiness: false, businessInfo: null });
       }
+      return () => {
+        alive = false;
+      };
     }
-
-    return () => {
-      alive = false;
-      unsubscribe();
-    };
   }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       ...auth,
       refreshMembership: async () => {
-        const userId = auth.session?.uid;
+        const userId = auth.session?.id;
         if (!userId) {
-          setAuth((prev) => ({ ...prev, hasBusiness: false, businessInfo: null }));
+          setAuth((prev) => ({
+            ...prev,
+            hasBusiness: false,
+            membership: null,
+            businessInfo: null,
+            activeStaff: null,
+          }));
           return false;
         }
-        const bizInfo = await userHasBusiness(userId);
-        setAuth((prev) => ({ ...prev, hasBusiness: !!bizInfo, businessInfo: bizInfo }));
-        return !!bizInfo;
+        const membership = await userHasBusiness(userId);
+        let staff = auth.activeStaff;
+        if (membership?.id) {
+          staff = await loadStoredStaff(userId, membership.id);
+        } else {
+          staff = null;
+        }
+        setAuth((prev) => ({
+          ...prev,
+          hasBusiness: !!membership,
+          membership,
+          businessInfo: overlayBusinessRole(membership, staff),
+          activeStaff: staff,
+        }));
+        return !!membership;
+      },
+      setActiveStaff: async (staff) => {
+        const uid = auth.session?.id;
+        const businessId = auth.membership?.id;
+        if (uid && businessId) {
+          const key = staffStorageKey(uid, businessId);
+          if (staff) {
+            await AsyncStorage.setItem(key, JSON.stringify(staff));
+          } else {
+            await AsyncStorage.removeItem(key);
+          }
+        }
+        setAuth((prev) => ({
+          ...prev,
+          activeStaff: staff,
+          businessInfo: overlayBusinessRole(prev.membership, staff),
+        }));
       },
       signOut: async () => {
-        await getFirebaseAuth().signOut();
-        setAuth({ isReady: true, session: null, hasBusiness: false, businessInfo: null });
+        const uid = auth.session?.id;
+        const businessId = auth.membership?.id;
+        if (uid && businessId) {
+          await AsyncStorage.removeItem(staffStorageKey(uid, businessId));
+        }
+        await supabase.auth.signOut();
+        setAuth({
+          isReady: true,
+          session: null,
+          hasBusiness: false,
+          membership: null,
+          businessInfo: null,
+          activeStaff: null,
+        });
       },
     }),
     [auth],

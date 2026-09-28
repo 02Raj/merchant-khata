@@ -44,20 +44,26 @@ function RootNavigator() {
     if (!isReady || !rootNavigationState?.key) return;
 
     const group = segments[0];
-    const screen = segments[1];
+    const screenName = String(segments[1] ?? '');
 
     if (!session) {
-      const onLoginOrOtp = group === '(auth)' && (screen === 'login' || screen === 'otp');
-      if (!onLoginOrOtp) {
+      const onAuthEntry =
+        group === '(auth)' &&
+        (screenName === 'login' || screenName === 'otp' || screenName === 'signup');
+      if (!onAuthEntry) {
         router.replace('/(auth)/login');
       }
       return;
     }
 
     if (!hasBusiness) {
-      if (screen !== 'business-setup') {
+      if (screenName !== 'business-setup') {
         router.replace('/(auth)/business-setup');
       }
+      return;
+    }
+
+    if (group === '(auth)' && screenName === 'staff-pin') {
       return;
     }
 
@@ -66,7 +72,7 @@ function RootNavigator() {
       return;
     }
 
-    if (group === '(tabs)' && screen === 'dashboard' && businessInfo?.role === 'waiter') {
+    if (group === '(tabs)' && screenName === 'dashboard' && businessInfo?.role === 'waiter') {
       router.replace('/(tabs)/tables');
     }
   }, [businessInfo, hasBusiness, isReady, router, segments, session]);

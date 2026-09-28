@@ -42,8 +42,6 @@ if (typeof globalThis.WebSocket === 'undefined') {
   };
 }
 
-import { getFirebaseAuth } from './firebase';
-
 const supabaseUrl = requirePublicEnv('EXPO_PUBLIC_SUPABASE_URL');
 const supabaseAnonKey = requirePublicEnv('EXPO_PUBLIC_SUPABASE_ANON_KEY');
 
@@ -58,13 +56,5 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     headers: {
       // Any additional headers could go here if needed
     },
-  },
-  accessToken: async () => {
-    try {
-      const auth = getFirebaseAuth();
-      return (await auth.currentUser?.getIdToken(false)) ?? '';
-    } catch {
-      return '';
-    }
   },
 });

@@ -35,6 +35,7 @@ import {
 } from '@/lib/salesCheckout';
 import { getMoqViolations, getStockViolations } from '@/lib/salesValidation';
 import { toE164India } from '@/lib/phone';
+import { createdByActor } from '@/lib/staffPin';
 
 type Customer = {
   id: string;
@@ -69,7 +70,7 @@ type CartItem = {
 };
 
 export default function SalesScreen() {
-  const { session, businessInfo } = useAuth();
+  const { session, businessInfo, activeStaff } = useAuth();
   
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -576,7 +577,7 @@ export default function SalesScreen() {
       const { data, error: rpcError } = await supabase.rpc('process_checkout', {
         p_business_id: businessInfo!.id,
         p_customer_id: selectedCustomer?.id || null,
-        p_created_by: session!.uid,
+        p_created_by: createdByActor(session?.uid, activeStaff),
         p_payment_type: resolvedType,
         p_total_amount: payableTotal,
         p_total_tax: cartTotals.taxTotal,

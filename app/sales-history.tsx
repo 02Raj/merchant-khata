@@ -27,6 +27,7 @@ import {
   type RetailReceiptSnapshot,
 } from '@/lib/retailReceipt';
 import { formatPaymentModeLabel, getSalePaymentSplit } from '@/lib/salesCheckout';
+import { createdByActor } from '@/lib/staffPin';
 import { supabase } from '@/lib/supabase';
 
 type SaleRow = {
@@ -61,7 +62,7 @@ type SaleItemRow = {
 
 export default function SalesHistoryScreen() {
   const router = useRouter();
-  const { businessInfo, session } = useAuth();
+  const { businessInfo, session, activeStaff } = useAuth();
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -229,7 +230,7 @@ export default function SalesHistoryScreen() {
       const { error } = await supabase.rpc('process_sale_return', {
         p_business_id: businessInfo.id,
         p_sale_id: detailSale.id,
-        p_created_by: session.uid,
+        p_created_by: createdByActor(session.uid, activeStaff),
         p_items: items,
       });
       if (error) throw error;

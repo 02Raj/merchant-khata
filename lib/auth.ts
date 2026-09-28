@@ -1,12 +1,3 @@
-import {
-  PhoneAuthProvider,
-  signInWithCredential,
-  signInWithEmailAndPassword,
-  type ApplicationVerifier,
-} from 'firebase/auth';
-
-import { getFirebaseAuth } from '@/lib/firebase';
-import { clearPendingOtp, getPendingOtp, setPendingOtp } from '@/lib/otpSession';
 import { supabase } from '@/lib/supabase';
 
 export type BusinessInfo = {
@@ -20,32 +11,37 @@ export type BusinessInfo = {
   role: 'owner' | 'staff' | 'waiter';
 };
 
-export async function sendPhoneOtp(phone: string, verifier: ApplicationVerifier) {
-  const auth = getFirebaseAuth();
-  const provider = new PhoneAuthProvider(auth);
-  const verificationId = await provider.verifyPhoneNumber(phone, verifier);
-  setPendingOtp({ phone, verificationId });
+export async function signUpOwnerWithEmail(email: string, password: string) {
+  const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+  if (error) throw error;
+  return { session: data.user };
 }
 
 export async function signInOwnerWithEmail(email: string, password: string) {
-  const auth = getFirebaseAuth();
-  const result = await signInWithEmailAndPassword(auth, email.trim(), password);
-  return { session: result.user };
+  const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) throw error;
+  return { session: data.user };
 }
 
-export async function verifyPhoneOtp(token: string) {
-  const pending = getPendingOtp();
-  if (!pending) {
-    throw new Error('No OTP in progress. Go back and send a new code.');
+export async function sendOwnerPasswordReset(email: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+  if (error) throw error;
+}
+
+export function validateOwnerPassword(password: string): string | null {
+  if (password.length < 8) return 'Password must be at least 8 characters.';
+  if (!/\d/.test(password)) return 'Include at least one number.';
+  return null;
+}
+
+export function validateOwnerEmail(email: string): string | null {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    return 'Enter a valid email address.';
   }
-
-  const auth = getFirebaseAuth();
-  const credential = PhoneAuthProvider.credential(pending.verificationId, token);
-  const result = await signInWithCredential(auth, credential);
-
-  clearPendingOtp();
-  return { session: result.user };
+  return null;
 }
+
+/* ═══ PHONE_OTP_LEGACY — REMOVED ═══ */
 
 export async function userHasBusiness(userId: string): Promise<BusinessInfo | null> {
   const { data, error } = await supabase
@@ -71,10 +67,8 @@ export async function userHasBusiness(userId: string): Promise<BusinessInfo | nu
     return null;
   }
 
-  // The inner join returns businesses as an object or array depending on relation setup,
-  // but since business_users -> businesses is a Many-to-One, it returns a single object.
   const business = Array.isArray(data.businesses) ? data.businesses[0] : data.businesses;
-  
+
   if (!business) return null;
 
   return {
@@ -89,8 +83,16 @@ export async function userHasBusiness(userId: string): Promise<BusinessInfo | nu
   };
 }
 
+const SUPABASE_ERROR_MESSAGES: Record<string, string> = {
+  'User already registered': 'This email is already registered. Log in instead.',
+  'Invalid login credentials': 'Wrong email or password.',
+  'Password should be at least 6 characters': 'Password is too weak. Use at least 6 characters.',
+};
+
 export function authErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    const mapped = SUPABASE_ERROR_MESSAGES[error.message];
+    if (mapped) return mapped;
     return error.message;
   }
   if (error instanceof Error) {

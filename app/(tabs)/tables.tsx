@@ -96,6 +96,9 @@ export default function TablesScreen() {
               <Text style={styles.addButtonText}>Add Table</Text>
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={{ padding: 4 }} onPress={() => router.push('/(auth)/staff-pin' as any)}>
+            <Ionicons name="keypad-outline" size={24} color={Colors.textSecondary} />
+          </TouchableOpacity>
           <TouchableOpacity style={{ padding: 4 }} onPress={() => router.push('/settings')}>
             <Ionicons name="settings-outline" size={24} color={Colors.textSecondary} />
           </TouchableOpacity>

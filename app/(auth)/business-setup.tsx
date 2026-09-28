@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/theme';
-import { getFirebaseAuth } from '@/lib/firebase';
+import { toE164India } from '@/lib/phone';
 
 type BusinessType = 'retail' | 'wholesale' | 'both' | 'restaurant';
 
@@ -31,6 +31,7 @@ export default function BusinessSetupScreen() {
   const [stateName, setStateName] = useState('');
   const [pincode, setPincode] = useState('');
   const [gstin, setGstin] = useState('');
+  const [ownerPhone, setOwnerPhone] = useState('');
   const [businessType, setBusinessType] = useState<BusinessType>('retail');
   
   // Modals
@@ -73,17 +74,22 @@ export default function BusinessSetupScreen() {
       return;
     }
 
+    const phoneParsed = toE164India(ownerPhone);
+    if (!phoneParsed.ok) {
+      setError(phoneParsed.error);
+      return;
+    }
+
     setLoading(true);
     try {
-      const user = getFirebaseAuth().currentUser;
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const ownerPhone = user.phoneNumber || '';
       const fullAddress = `${street.trim()}, ${city.trim()}, ${stateName} - ${pincode.trim()}`;
 
       const { error: insertError } = await supabase.from('businesses').insert({
         name: name.trim(),
-        owner_phone: ownerPhone,
+        owner_phone: phoneParsed.phone,
         address: fullAddress,
         business_type: businessType,
         gstin: gstin.trim() || null,
@@ -107,7 +113,7 @@ export default function BusinessSetupScreen() {
 
   const isFormValid = mode === 'join' 
     ? joinCode.length === 6 
-    : (name.trim().length > 0 && street.trim().length > 0 && city.trim().length > 0 && stateName.length > 0 && pincode.trim().length === 6);
+    : (name.trim().length > 0 && street.trim().length > 0 && city.trim().length > 0 && stateName.length > 0 && pincode.trim().length === 6 && ownerPhone.replace(/\D/g, '').length === 10);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -168,6 +174,22 @@ export default function BusinessSetupScreen() {
                   value={name}
                   onChangeText={setName}
                   placeholder="e.g. Sharma General Store"
+                  placeholderTextColor={Colors.textSecondary}
+                  editable={!loading}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Shop phone *</Text>
+              <View style={styles.inputContainer}>
+                <Text style={{ paddingHorizontal: 16, color: Colors.textSecondary, fontSize: 16, fontWeight: '500' }}>+91</Text>
+                <TextInput
+                  style={styles.input}
+                  value={ownerPhone}
+                  onChangeText={(t) => setOwnerPhone(t.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="10-digit mobile"
+                  keyboardType="phone-pad"
                   placeholderTextColor={Colors.textSecondary}
                   editable={!loading}
                 />

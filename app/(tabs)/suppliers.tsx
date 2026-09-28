@@ -14,6 +14,7 @@ import { useAuth } from '@/context/AuthContext';
 import * as Haptics from 'expo-haptics';
 import { Skeleton } from '@/components/Skeleton';
 import { toE164India } from '@/lib/phone';
+import { createdByActor } from '@/lib/staffPin';
 
 type Supplier = {
   id: string;
@@ -31,7 +32,7 @@ type LedgerEntry = {
 };
 
 export default function SuppliersScreen() {
-  const { businessInfo, session } = useAuth();
+  const { businessInfo, session, activeStaff } = useAuth();
   
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -243,7 +244,7 @@ export default function SuppliersScreen() {
       const { error } = await supabase.rpc('record_supplier_purchase', {
         p_business_id: businessInfo!.id,
         p_supplier_id: selectedSupplier!.id,
-        p_created_by: session?.uid || 'owner',
+        p_created_by: createdByActor(session?.uid, activeStaff),
         p_total_amount: amount,
         p_items: items,
       });

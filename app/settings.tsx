@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, TextInput, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -11,23 +11,46 @@ import { Colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { HIDE_RESTAURANT_LAUNCH_EXTRAS, isRestaurantBusiness } from '@/lib/restaurantHelpers';
+import {
+  createStaffProfile,
+  listStaffProfiles,
+  setStaffActive,
+  type StaffRow,
+} from '@/lib/staffAuth';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { businessInfo, signOut } = useAuth();
+  const { businessInfo, membership, activeStaff, setActiveStaff, signOut } = useAuth();
+  const isOwnerAccount = membership?.role === 'owner';
   
   const [paperSize, setPaperSize] = useState<'58mm' | '80mm'>('80mm');
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [staffRows, setStaffRows] = useState<StaffRow[]>([]);
+  const [staffModal, setStaffModal] = useState(false);
+  const [staffName, setStaffName] = useState('');
+  const [staffRole, setStaffRole] = useState<'staff' | 'waiter'>('staff');
+  const [staffPin, setStaffPin] = useState('');
+  const [savingStaff, setSavingStaff] = useState(false);
   const [showStaffExtra, setShowStaffExtra] = useState(false);
 
   useEffect(() => {
     loadSettings();
-    if (businessInfo?.id && businessInfo?.role === 'owner') {
+    if (businessInfo?.id && isOwnerAccount) {
       fetchInviteCode();
+      loadStaff();
     }
-  }, [businessInfo]);
+  }, [businessInfo?.id, isOwnerAccount]);
+
+  const loadStaff = async () => {
+    if (!businessInfo?.id) return;
+    try {
+      setStaffRows(await listStaffProfiles(businessInfo.id));
+    } catch (e) {
+      console.log('Failed to load staff', e);
+    }
+  };
 
   const fetchInviteCode = async () => {
     try {
@@ -172,13 +195,39 @@ export default function SettingsScreen() {
               <View>
                 <Text style={styles.storeName}>{(businessInfo as any)?.name}</Text>
                 <Text style={styles.storeType}>{businessInfo?.business_type.toUpperCase()} STORE</Text>
+                {activeStaff ? (
+                  <Text style={styles.storeType}>Clocked in: {activeStaff.displayName} ({activeStaff.role})</Text>
+                ) : null}
               </View>
             </View>
+            <View style={styles.divider} />
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={() => router.push('/(auth)/staff-pin' as any)}
+            >
+              <Ionicons name="keypad-outline" size={20} color={Colors.accent} />
+              <Text style={styles.actionBtnText}>Switch user (staff PIN)</Text>
+            </TouchableOpacity>
+            {activeStaff ? (
+              <>
+                <View style={styles.divider} />
+                <TouchableOpacity
+                  style={styles.actionBtn}
+                  onPress={async () => {
+                    await setActiveStaff(null);
+                    router.replace('/');
+                  }}
+                >
+                  <Ionicons name="person-outline" size={20} color={Colors.accent} />
+                  <Text style={styles.actionBtnText}>Back to owner</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
           </View>
         </View>
 
         {/* Staff / waiter invite — restaurant launch hides this; login + generateInviteCode stay for later. */}
-        {businessInfo?.role === 'owner' && (
+        {isOwnerAccount && (
           <View style={styles.section}>
             {isRestaurantBusiness(businessInfo?.business_type) && HIDE_RESTAURANT_LAUNCH_EXTRAS ? (
               <TouchableOpacity style={styles.extraToggle} onPress={() => setShowStaffExtra((v) => !v)}>
@@ -227,6 +276,39 @@ export default function SettingsScreen() {
               )}
             </View>
             )}
+
+            <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Staff PIN (this till)</Text>
+            <View style={styles.card}>
+              <Text style={[styles.settingDesc, { paddingHorizontal: 16, paddingTop: 12 }]}>
+                No SMS. Staff clock in with a 4–6 digit PIN while you stay logged in.
+              </Text>
+              {staffRows.map((row) => (
+                <View key={row.id} style={styles.settingRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.settingLabel}>
+                      {row.display_name} · {row.role}{row.is_active ? '' : ' (off)'}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={async () => {
+                      try {
+                        await setStaffActive(row.id, !row.is_active);
+                        await loadStaff();
+                      } catch (e: any) {
+                        Alert.alert('Error', e.message || 'Could not update staff');
+                      }
+                    }}
+                  >
+                    <Text style={styles.actionBtnText}>{row.is_active ? 'Disable' : 'Enable'}</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.actionBtn} onPress={() => setStaffModal(true)}>
+                <Ionicons name="person-add-outline" size={20} color={Colors.accent} />
+                <Text style={styles.actionBtnText}>Add staff PIN</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -277,6 +359,73 @@ export default function SettingsScreen() {
         </View>
 
       </ScrollView>
+
+      <Modal visible={staffModal} animationType="slide" transparent>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <View style={{ backgroundColor: Colors.bg, padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
+            <Text style={styles.settingLabel}>Add staff</Text>
+            <TextInput
+              style={{ color: Colors.textPrimary, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, padding: 12, marginTop: 12 }}
+              placeholder="Name"
+              placeholderTextColor={Colors.textSecondary}
+              value={staffName}
+              onChangeText={setStaffName}
+            />
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+              {(['staff', 'waiter'] as const).map((r) => (
+                <TouchableOpacity
+                  key={r}
+                  style={[styles.toggleBtn, staffRole === r && styles.toggleBtnActive, { flex: 1 }]}
+                  onPress={() => setStaffRole(r)}
+                >
+                  <Text style={[styles.toggleText, staffRole === r && styles.toggleTextActive]}>{r}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              style={{ color: Colors.textPrimary, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, padding: 12, marginTop: 12 }}
+              placeholder="4–6 digit PIN"
+              placeholderTextColor={Colors.textSecondary}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+              value={staffPin}
+              onChangeText={(t) => setStaffPin(t.replace(/\D/g, '').slice(0, 6))}
+            />
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16, marginBottom: 12 }}>
+              <TouchableOpacity style={[styles.actionBtn, { flex: 1 }]} onPress={() => setStaffModal(false)}>
+                <Text style={styles.actionBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, { flex: 1 }]}
+                disabled={savingStaff}
+                onPress={async () => {
+                  if (!businessInfo?.id) return;
+                  setSavingStaff(true);
+                  try {
+                    await createStaffProfile({
+                      businessId: businessInfo.id,
+                      displayName: staffName,
+                      role: staffRole,
+                      pin: staffPin,
+                    });
+                    setStaffModal(false);
+                    setStaffName('');
+                    setStaffPin('');
+                    await loadStaff();
+                  } catch (e: any) {
+                    Alert.alert('Error', e.message || 'Could not add staff');
+                  } finally {
+                    setSavingStaff(false);
+                  }
+                }}
+              >
+                {savingStaff ? <ActivityIndicator color={Colors.accent} /> : <Text style={styles.actionBtnText}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
